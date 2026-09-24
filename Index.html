@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pilotage SDACR</title>
+<title>Pilotage stratégique</title>
 <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
 <style>
 :root{
-  --ink:#1d2433; --muted:#5b6475; --paper:#f6f7f9; --card:#ffffff; --line:#d9dde4;
+  --ink:#1d2433; --muted:#5b6475; --paper:#f6f7f9; --card:#fff; --line:#d9dde4;
   --accent:#1f3a5f; --accent-soft:#e6ecf4;
   --p1:#c8102e; --p1-soft:#fbe8eb; --p2:#c77700; --p2-soft:#fdf1e0; --p3:#4a6a8a; --p3-soft:#e9eff5;
-  --ok:#2e7d4f; --warn:#c77700; --ko:#b3261e; --none:#aab1bd;
+  --s-eng:#aab1bd; --s-cours:#d98a00; --s-real:#2e7d4f; --s-aband:#3d4452;
+  --ko:#b3261e;
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
@@ -18,54 +19,78 @@ body{font-family:Marianne,"Segoe UI",Tahoma,system-ui,sans-serif;font-size:13px;
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-/* En-tête : onglets + filtres */
 header{background:var(--card);border-bottom:1px solid var(--line);padding:8px 12px 0}
-.tabs{display:flex;gap:2px}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.strat{font-size:15px;font-weight:700;color:var(--accent);border:1px solid var(--line);border-radius:4px;padding:4px 8px;background:#fff}
+.tabs{display:flex;gap:2px;margin-left:8px}
 .tab{border:0;background:none;padding:8px 14px;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;font-weight:600}
 .tab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
+.refresh{margin-left:auto;border:1px solid var(--line);background:#fff;border-radius:4px;padding:4px 10px;cursor:pointer}
 .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0}
 .chip{border:1px solid var(--line);background:var(--card);border-radius:14px;padding:3px 10px;cursor:pointer;font-weight:600}
 .chip[aria-pressed="true"].P1{background:var(--p1);border-color:var(--p1);color:#fff}
 .chip[aria-pressed="true"].P2{background:var(--p2);border-color:var(--p2);color:#fff}
 .chip[aria-pressed="true"].P3{background:var(--p3);border-color:var(--p3);color:#fff}
-.filters select,.filters input{border:1px solid var(--line);border-radius:4px;padding:4px 6px;background:#fff;max-width:220px}
-.filters input{width:180px}
+.filters select,.filters input[type=search]{border:1px solid var(--line);border-radius:4px;padding:4px 6px;background:#fff;max-width:200px}
+.filters input[type=search]{width:160px}
+.check{display:flex;align-items:center;gap:4px;color:var(--muted)}
 .reset{border:0;background:none;color:var(--accent);cursor:pointer;text-decoration:underline}
 .count{margin-left:auto;color:var(--muted)}
 
 main{flex:1;overflow:auto;padding:12px}
 .view{display:none}.view.active{display:block}
+.banner{margin-bottom:12px;padding:10px 12px;border:1px solid #e7b9b5;background:#fdf3f2;color:var(--ko);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.banner.info{border-color:#c9d6e6;background:var(--accent-soft);color:var(--accent)}
 
-/* Pilotage */
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
-.kpi{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);padding:10px 12px}
-.kpi b{display:block;font-size:22px;line-height:1.1}
+/* Bandeau de réalisation */
+.hero{background:var(--card);border:1px solid var(--line);padding:14px 16px;margin-bottom:12px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:18px;align-items:center}
+@media (max-width:700px){.hero{grid-template-columns:1fr}}
+.big{font-size:44px;font-weight:800;line-height:1;color:var(--accent)}
+.big small{display:block;font-size:13px;font-weight:600;color:var(--muted);margin-top:4px}
+.gauge{position:relative;height:18px;background:#eef0f3;border-radius:3px}
+.gauge .fill{position:absolute;inset:0 auto 0 0;background:var(--accent);border-radius:3px}
+.gauge .time{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--ink)}
+.gauge-legend{display:flex;justify-content:space-between;color:var(--muted);margin-top:6px;flex-wrap:wrap;gap:6px}
+.gap-ok{color:var(--s-real);font-weight:700}.gap-ko{color:var(--ko);font-weight:700}
+.stack{display:flex;height:10px;border-radius:3px;overflow:hidden;margin-top:12px;background:#eef0f3}
+.stack i{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;background:var(--c)}
+
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px}
+.kpi{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);padding:9px 12px}
+.kpi b{display:block;font-size:20px;line-height:1.15}
 .kpi span{color:var(--muted)}
 .kpi.alert{border-left-color:var(--ko)}
-.bar{display:flex;height:8px;margin-top:6px;border-radius:4px;overflow:hidden;background:var(--line)}
-.bar i{display:block}
-.two{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:14px;align-items:start}
-@media (max-width:900px){.two{grid-template-columns:1fr}}
+
+.two{display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:14px;align-items:start}
+@media (max-width:950px){.two{grid-template-columns:1fr}}
 .panel{background:var(--card);border:1px solid var(--line)}
 .panel h2{font-size:14px;margin:0;padding:10px 12px;border-bottom:1px solid var(--line)}
-.obj{padding:9px 12px;background:var(--accent);color:#fff;font-weight:700}
-.sobj{padding:7px 12px;background:var(--accent-soft);font-weight:600;color:var(--accent)}
-.row{display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:10px;padding:8px 12px;border-top:1px solid var(--line);align-items:start}
+.obj,.sobj{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px;align-items:center;padding:8px 12px}
+.obj{background:var(--accent);color:#fff;font-weight:700}
+.sobj{background:var(--accent-soft);font-weight:600;color:var(--accent)}
+.mini{display:flex;align-items:center;gap:6px;font-weight:700}
+.mini .pb{flex:1;height:6px;background:rgba(255,255,255,.3);border-radius:3px;overflow:hidden}
+.sobj .mini .pb{background:#fff}
+.mini .pb i{display:block;height:100%;background:currentColor}
+.row{display:grid;grid-template-columns:minmax(0,1fr) 150px auto;gap:10px;padding:8px 12px;border-top:1px solid var(--line);align-items:start}
 .row:hover{background:#fafbfc}
-.row .title{cursor:pointer}
-.row .title strong{margin-right:4px}
-.meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;color:var(--muted)}
+.title{cursor:pointer}
+.meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;color:var(--muted);align-items:center}
 .badge{display:inline-block;padding:1px 7px;border-radius:3px;font-weight:700;font-size:11px}
-.badge.P1{background:var(--p1-soft);color:var(--p1)}
-.badge.P2{background:var(--p2-soft);color:var(--p2)}
-.badge.P3{background:var(--p3-soft);color:var(--p3)}
+.badge.P1{background:var(--p1-soft);color:var(--p1)}.badge.P2{background:var(--p2-soft);color:var(--p2)}.badge.P3{background:var(--p3-soft);color:var(--p3)}
 .badge.nd{background:#eee;color:var(--muted)}
 .tag{border:1px solid var(--line);border-radius:3px;padding:0 6px}
-.dot{width:10px;height:10px;border-radius:50%;margin-top:4px}
-.dot.complet{background:var(--ok)}.dot.partiel{background:var(--warn)}.dot.vide{background:var(--none)}
+.tag.late{border-color:#e7b9b5;color:var(--ko);background:#fdf3f2}
+.st{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;background:var(--c)}
+.prog{display:flex;flex-direction:column;gap:3px}
+.prog .pb{height:7px;background:#eef0f3;border-radius:3px;overflow:hidden}
+.prog .pb i{display:block;height:100%;background:var(--c)}
+.prog b{font-size:12px}
 .links-btn{border:1px solid var(--line);background:#fff;border-radius:12px;padding:2px 9px;cursor:pointer;white-space:nowrap}
 .links-btn.zero{color:var(--ko);border-color:#e7b9b5;background:#fdf3f2}
-.links{grid-column:2 / 4;margin:4px 0 0;padding:6px 10px;background:var(--paper);border-left:3px solid var(--accent);list-style:none}
+.links{grid-column:1 / 4;margin:4px 0 0;padding:6px 10px;background:var(--paper);border-left:3px solid var(--accent);list-style:none}
 .links li{padding:2px 0}
 .links .kind{color:var(--muted);font-size:11px;margin-left:6px}
 table.grp{width:100%;border-collapse:collapse}
@@ -79,50 +104,68 @@ table.grp thead th{border-top:0;color:var(--muted);font-weight:600}
 .mrow{display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#fff}
 .mrow.P1{background:var(--p1)}.mrow.P2{background:var(--p2)}.mrow.P3{background:var(--p3)}
 .cell{background:var(--card);border:1px solid var(--line);min-height:120px;padding:8px}
-.cell header{all:unset;display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
-.cell header strong{font-size:13px}
-.cell header em{font-style:normal;font-size:20px;font-weight:800;color:var(--muted)}
-.cell.P1.oui{background:#fff7f8;border-color:var(--p1)}
-.card{display:block;width:100%;text-align:left;border:1px solid var(--line);background:#fff;padding:5px 7px;margin-top:4px;cursor:pointer;border-radius:3px}
+.cell .ch{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;gap:8px}
+.cell .ch em{font-style:normal;color:var(--muted)}
+.card{display:grid;grid-template-columns:4px minmax(0,1fr) auto;gap:8px;width:100%;text-align:left;border:1px solid var(--line);background:#fff;padding:5px 7px 5px 0;margin-top:4px;cursor:pointer;border-radius:3px;align-items:center}
+.card::before{content:"";align-self:stretch;background:var(--c);border-radius:3px 0 0 3px}
 .card:hover{border-color:var(--accent)}
 .card small{color:var(--muted);display:block}
+.card .pct{font-weight:700}
 .unq{margin-top:12px}
 
 /* Saisie */
 .edit{display:grid;grid-template-columns:minmax(220px,320px) minmax(0,1fr);gap:14px;align-items:start}
 @media (max-width:760px){.edit{grid-template-columns:1fr}}
 .list{max-height:calc(100vh - 170px);overflow:auto}
-.item{display:grid;grid-template-columns:14px 1fr;gap:8px;width:100%;text-align:left;border:0;border-top:1px solid var(--line);background:#fff;padding:7px 10px;cursor:pointer}
+.item{display:grid;grid-template-columns:40px 1fr;gap:8px;width:100%;text-align:left;border:0;border-top:1px solid var(--line);background:#fff;padding:7px 10px;cursor:pointer}
+.item b{color:var(--c)}
 .item[aria-current="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 var(--accent)}
 .form{padding:14px}
 .form h3{margin:0 0 4px;font-size:15px}
-.form .ctx{color:var(--muted);margin-bottom:12px}
+.ctx{color:var(--muted);margin-bottom:12px}
+fieldset{border:1px solid var(--line);padding:10px 12px 12px;margin:0 0 12px}
+legend{font-weight:700;color:var(--accent);padding:0 4px}
+.avc{display:grid;grid-template-columns:minmax(0,1fr) 80px auto;gap:12px;align-items:center}
+.avc input[type=range]{width:100%;accent-color:var(--accent)}
+.avc input[type=number]{border:1px solid var(--line);border-radius:4px;padding:6px 8px;width:80px}
+.avc-foot{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:10px}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-label{display:flex;flex-direction:column;gap:4px;font-weight:600}
-label input,label textarea{border:1px solid var(--line);border-radius:4px;padding:6px 8px;font-weight:400;background:#fff}
+label.f{display:flex;flex-direction:column;gap:4px;font-weight:600}
+label.f input,label.f textarea{border:1px solid var(--line);border-radius:4px;padding:6px 8px;font-weight:400;background:#fff}
 label.full{grid-column:1 / 3}
-textarea{min-height:80px;resize:vertical}
+textarea{min-height:70px;resize:vertical}
 .invalid{border-color:var(--ko)!important;background:#fdf3f2!important}
-.msgs{margin:12px 0 0;padding:0;list-style:none}
+.msgs{margin:0;padding:0;list-style:none}
 .msgs li{padding:4px 8px;margin-top:4px;border-radius:3px}
-.msgs .err{background:#fdf3f2;color:var(--ko)}
-.msgs .wrn{background:#fdf6ea;color:#8a5300}
-.actions{display:flex;gap:10px;align-items:center;margin-top:14px}
+.msgs .err{background:#fdf3f2;color:var(--ko)}.msgs .wrn{background:#fdf6ea;color:#8a5300}
+.actions{display:flex;gap:10px;align-items:center;margin-top:12px}
 .btn{border:0;background:var(--accent);color:#fff;padding:7px 16px;border-radius:4px;cursor:pointer;font-weight:600}
 .btn:disabled{opacity:.5;cursor:default}
 .btn.ghost{background:none;color:var(--accent);border:1px solid var(--accent)}
 .status{color:var(--muted)}
 .empty{padding:24px;text-align:center;color:var(--muted)}
-.error-box{margin:12px;padding:12px;background:#fdf3f2;border:1px solid #e7b9b5;color:var(--ko)}
+.thread{list-style:none;margin:0 0 10px;padding:0;max-height:260px;overflow:auto}
+.thread li{border-left:3px solid var(--line);padding:6px 10px;margin-bottom:8px;background:var(--paper)}
+.thread li.legacy{border-left-color:var(--s-eng)}
+.thread .who{font-size:11px;color:var(--muted);margin-bottom:3px}
+.thread .who b{color:var(--ink)}
+.thread .txt{white-space:pre-wrap}
+.addc{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.addc label{width:min(100%,320px)}
+.addc textarea{width:100%;border:1px solid var(--line);border-radius:4px;padding:6px 8px}
 </style>
 </head>
 <body>
 <header>
-  <nav class="tabs" role="tablist">
-    <button class="tab" role="tab" data-view="pilotage" aria-selected="true">Pilotage</button>
-    <button class="tab" role="tab" data-view="matrice" aria-selected="false">Matrice priorité × facilité</button>
-    <button class="tab" role="tab" data-view="saisie" aria-selected="false">Saisie des indicateurs</button>
-  </nav>
+  <div class="top">
+    <select id="strat" class="strat" aria-label="Stratégie"></select>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-view="pilotage" aria-selected="true">Pilotage</button>
+      <button class="tab" role="tab" data-view="matrice" aria-selected="false">Matrice priorité × facilité</button>
+      <button class="tab" role="tab" data-view="saisie" aria-selected="false">Saisie</button>
+    </nav>
+    <button class="refresh" id="refresh" title="Relire les données">Actualiser</button>
+  </div>
   <div class="filters">
     <button class="chip P1" data-prio="P1" aria-pressed="false">P1</button>
     <button class="chip P2" data-prio="P2" aria-pressed="false">P2</button>
@@ -132,14 +175,16 @@ textarea{min-height:80px;resize:vertical}
     <select id="fFac" aria-label="Facile à atteindre">
       <option value="">Facilité : toutes</option><option value="Oui">Facile : oui</option><option value="Non">Facile : non</option>
     </select>
+    <select id="fSt" aria-label="Statut"></select>
     <input id="fTxt" type="search" placeholder="Rechercher…" aria-label="Rechercher">
+    <label class="check"><input type="checkbox" id="fPond"> Pondérer par priorité</label>
     <button class="reset" id="reset">Réinitialiser</button>
     <span class="count" id="count"></span>
   </div>
 </header>
 
 <main>
-  <div id="error"></div>
+  <div id="banner"></div>
   <section class="view active" id="v-pilotage"></section>
   <section class="view" id="v-matrice"></section>
   <section class="view" id="v-saisie"></section>
@@ -147,37 +192,45 @@ textarea{min-height:80px;resize:vertical}
 
 <script>
 /* =========================================================
-   CONFIGURATION — noms de colonnes acceptés (accents, espaces
-   et casse ignorés). Ajuster ici si un nom diffère.
+   CONFIGURATION
    ========================================================= */
 const CONFIG = {
-  tableDefaut: 'Recap_SDACR',
+  // Tables de stratégie détectées automatiquement : Recap_SDACR_25_30, Recap_PE_23_28…
+  prefixeTables: /^Recap_(SDACR|PE)_(\d{2})_(\d{2})$/i,
+  nomsTypes: {SDACR: 'SDACR', PE: "Projet d'établissement"},
+  // Noms de colonnes acceptés (accents, espaces et casse ignorés)
   cols: {
     objectif:     ['ID_Objectif'],
     sousObjectif: ['ID_Sous_Objectif', 'ID_Sous Objectif'],
     resultat:     ['Resultat_Attendu'],
     priorite:     ['Priorite'],
-    facile:       ['Facile_a_atteindre', 'Facile à atteindre'],
+    facile:       ['Facile_a_atteindre'],
     groupement:   ['Groupement_Porteur', 'Groupement_Pilote'],
     t0:           ['Valeur_T0'],
     anneeT0:      ['Annee_T0'],
     cible:        ['Cible'],
     echeance:     ['Echeance'],
     observation:  ['Observation'],
-    liens:        ['ID_Projet_Action']
+    liens:        ['ID_Projet_Action'],
+    avancement:   ['Avancement', 'Taux_Avancement'],
+    statut:       ['Statut', 'Etat_Realisation'],
+    dateMaj:      ['Date_Maj', 'Date_MAJ_Avancement']
   },
-  // Table des projets/actions (utilisée si la colonne liens ne précise pas la table)
+  // Table unique d'historique des commentaires (toutes stratégies)
+  tableObs: 'Observations',
+  colsObs: {strategie: ['Strategie'], idResultat: ['ID_Resultat'], resultat: ['Resultat_Attendu'], texte: ['Commentaire'],
+            nom: ['Auteur', 'Auteur_Nom'], date: ['Date_Commentaire'], email: ['Auteur_Email']},
   tableProjets: 'Liste_PEPS_AV',
   colLibelleProjet: ['ID_Projet_Action', 'ID_Projet_Action_AV', 'Libelle', 'Intitule', 'Nom'],
-  colTypeProjet: ['Nature', 'Type', 'Nature_Action', 'Type_Projet_Action']
+  colTypeProjet: ['Nature', 'Type', 'Nature_Action', 'Type_Projet_Action'],
+  poids: {P1: 3, P2: 2, P3: 1, '': 1},
+  toleranceRetard: 15  // points de % sous le rythme attendu avant de signaler un retard
 };
 
-const MATRICE = {
-  'P1|Oui': 'Gains rapides',   'P1|Non': 'Chantiers stratégiques',
-  'P2|Oui': 'À engager',       'P2|Non': 'À planifier',
-  'P3|Oui': 'Opportunités',    'P3|Non': 'À différer'
-};
-const PRIO_COLOR = {P1:'var(--p1)', P2:'var(--p2)', P3:'var(--p3)'};
+const STATUTS = ['À engager', 'En cours', 'Réalisé', 'Abandonné'];
+const ST_COLOR = {'À engager': 'var(--s-eng)', 'En cours': 'var(--s-cours)', 'Réalisé': 'var(--s-real)', 'Abandonné': 'var(--s-aband)'};
+const MATRICE = {'P1|Oui': 'Gains rapides', 'P1|Non': 'Chantiers stratégiques', 'P2|Oui': 'À engager rapidement',
+                 'P2|Non': 'À planifier', 'P3|Oui': 'Opportunités', 'P3|Non': 'À différer'};
 
 /* ---------- utilitaires ---------- */
 const $ = s => document.querySelector(s);
@@ -185,6 +238,8 @@ const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const norm = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
 const isEmpty = v => v === null || v === undefined || v === '' || (typeof v === 'number' && isNaN(v));
 const fmt = v => isEmpty(v) ? '—' : (typeof v === 'number' ? v.toLocaleString('fr-FR') : String(v));
+const pctTxt = v => v === null ? '—' : Math.round(v) + ' %';
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const codeOf = s => (String(s || '').match(/^\s*([\d.]+)/) || [,''])[1].replace(/\.$/, '');
 function natCmp(a, b){
   const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -194,26 +249,45 @@ function natCmp(a, b){
   }
   return 0;
 }
-function resolveCol(keys, candidates){
-  const map = {}; keys.forEach(k => map[norm(k)] = k);
-  for (const c of candidates){ if (map[norm(c)]) return map[norm(c)]; }
+function resolveCol(keys, cands){
+  const m = {}; keys.forEach(k => m[norm(k)] = k);
+  for (const c of cands) if (m[norm(c)]) return m[norm(c)];
   return null;
 }
 const normPrio = v => { const m = String(v || '').toUpperCase().match(/P\s*([123])/); return m ? 'P' + m[1] : ''; };
-const normFac = v => {
-  if (v === true) return 'Oui'; if (v === false) return 'Non';
-  const s = norm(v || ''); return s.startsWith('oui') ? 'Oui' : s.startsWith('non') ? 'Non' : '';
-};
+const normFac = v => { if (v === true) return 'Oui'; if (v === false) return 'Non';
+  const s = norm(v || ''); return s.startsWith('oui') ? 'Oui' : s.startsWith('non') ? 'Non' : ''; };
+const statutAuto = pct => pct >= 100 ? 'Réalisé' : pct > 0 ? 'En cours' : 'À engager';
+function readPct(v){ // accepte 0–1 (format % Grist) ou 0–100
+  if (isEmpty(v) || isNaN(Number(v))) return 0;
+  const n = Number(v); return clamp(n <= 1 ? n * 100 : n, 0, 100);
+}
+const yStart = y => new Date(y, 0, 1).getTime();
+const yEnd = y => new Date(y, 11, 31, 23, 59).getTime();
+function dateFromGrist(v){ if (isEmpty(v)) return null; const d = new Date(Number(v) * 1000); return isNaN(d) ? null : d; }
+const dFr = d => d ? d.toLocaleDateString('fr-FR') : '—';
 
 /* ---------- état ---------- */
 const S = {
-  tableId: null, colIds: {}, rows: [], refLabels: {},
-  view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', txt: '',
-  selectedId: null, openLinks: new Set(), dirty: false
+  strategies: [], strat: null, colIds: {}, rows: [], refLabels: {}, attached: null,
+  view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', st: '', txt: '', pond: false,
+  selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: ''
 };
 
-/* ---------- lecture des liens projets/actions ---------- */
-// Gère les encodages Grist : ['L', …], ['R', table, id], ['r', table, [ids]], ids bruts, textes
+/* ---------- stratégies disponibles ---------- */
+async function listStrategies(){
+  const ids = await grist.docApi.listTables();
+  return ids.filter(t => CONFIG.prefixeTables.test(t)).map(t => {
+    const m = t.match(CONFIG.prefixeTables), type = m[1].toUpperCase();
+    const start = 2000 + +m[2], end = 2000 + +m[3];
+    return {id: t, type, start, end, label: `${CONFIG.nomsTypes[type] || type} ${start}-${end}`};
+  }).sort((a, b) => a.type.localeCompare(b.type) || b.start - a.start);
+}
+function fillStrategySelect(){
+  $('#strat').innerHTML = S.strategies.map(s => `<option value="${esc(s.id)}" ${s.id === S.strat?.id ? 'selected' : ''}>${esc(s.label)}</option>`).join('');
+}
+
+/* ---------- liens projets/actions ---------- */
 function collectRefs(v, out){
   if (v === null || v === undefined || v === '') return;
   if (Array.isArray(v)){
@@ -233,7 +307,7 @@ function kindOf(label, typeVal){
   if (!isEmpty(typeVal)){
     const t = norm(typeVal);
     if (t.includes('projet') || t === 'p') return 'Projet';
-    if (t.includes('action') || t === 'a' || t === 'av' || t === 'meo') return 'Action';
+    if (t.includes('action') || ['a','av','meo'].includes(t)) return 'Action';
     return String(typeVal);
   }
   const m = String(label).match(/^\S*?_([A-Za-z]+)(\s|$)/);
@@ -251,8 +325,8 @@ async function loadRefTables(tables){
       const typ = resolveCol(keys, CONFIG.colTypeProjet);
       const m = {};
       raw.id.forEach((id, i) => {
-        const label = lab ? String(raw[lab][i] ?? '') : ('#' + id);
-        m[id] = {label: label || ('#' + id), kind: kindOf(label, typ ? raw[typ][i] : null)};
+        const label = lab ? String(raw[lab][i] ?? '') : '#' + id;
+        m[id] = {label: label || '#' + id, kind: kindOf(label, typ ? raw[typ][i] : null)};
       });
       S.refLabels[t] = m;
     } catch(e){ S.refLabels[t] = {}; }
@@ -261,86 +335,167 @@ async function loadRefTables(tables){
 
 /* ---------- chargement ---------- */
 async function load(){
+  const banner = $('#banner');
   try {
-    if (!S.tableId){
-      try { S.tableId = await grist.getSelectedTableId(); } catch(e){}
-      S.tableId = S.tableId || CONFIG.tableDefaut;
+    S.strategies = await listStrategies();
+    if (!S.strategies.length){
+      banner.innerHTML = `<div class="banner">Aucune table de stratégie trouvée. Les tables doivent être nommées Recap_SDACR_AA_AA ou Recap_PE_AA_AA (ex. Recap_SDACR_25_30).</div>`;
+      ['pilotage','matrice','saisie'].forEach(v => $('#v-' + v).innerHTML = '');
+      return;
     }
-    const raw = await grist.docApi.fetchTable(S.tableId);
+    if (!S.strat || !S.strategies.some(s => s.id === S.strat.id)){
+      let saved = null; try { saved = await grist.getOption('strategie'); } catch(e){}
+      S.strat = S.strategies.find(s => s.id === saved) || S.strategies.find(s => s.id === S.attached) || S.strategies[0];
+    } else S.strat = S.strategies.find(s => s.id === S.strat.id);
+    fillStrategySelect();
+
+    const raw = await grist.docApi.fetchTable(S.strat.id);
     const keys = Object.keys(raw);
     const missing = [];
-    for (const [k, cands] of Object.entries(CONFIG.cols)){
-      S.colIds[k] = resolveCol(keys, cands);
-      if (!S.colIds[k]) missing.push(cands[0]);
+    for (const [k, c] of Object.entries(CONFIG.cols)){
+      S.colIds[k] = resolveCol(keys, c);
+      if (!S.colIds[k]) missing.push(k);
     }
-    const errBox = $('#error');
-    errBox.innerHTML = missing.length
-      ? `<div class="error-box">Colonnes introuvables dans la table ${esc(S.tableId)} : ${missing.map(esc).join(', ')}. Ajustez CONFIG.cols en tête du widget.</div>` : '';
+    banner.innerHTML = missing.length
+      ? `<div class="banner">Colonnes introuvables dans ${esc(S.strat.id)} : ${missing.map(k => esc(CONFIG.cols[k][0])).join(', ')}. Créez-les ou ajustez CONFIG.cols en tête du widget.</div>` : '';
 
     const get = (k, i) => S.colIds[k] ? raw[S.colIds[k]][i] : null;
     const refTables = new Set();
+    const now = Date.now(), curYear = new Date().getFullYear();
     const rows = raw.id.map((id, i) => {
       const refs = []; collectRefs(get('liens', i), refs);
       refs.forEach(r => { if (r.id) refTables.add(r.t || CONFIG.tableProjets); });
       const resultat = String(get('resultat', i) ?? '');
+      const pct = readPct(get('avancement', i));
+      const stRaw = String(get('statut', i) ?? '');
+      const statut = norm(stRaw) === 'abandonne' ? 'Abandonné' : statutAuto(pct);
+      const anneeT0 = get('anneeT0', i), echeance = get('echeance', i);
+      // rythme attendu : linéaire entre l'année T0 (ou début de stratégie) et l'échéance (ou fin de stratégie)
+      const y0 = !isEmpty(anneeT0) ? Number(anneeT0) : S.strat.start;
+      const y1 = !isEmpty(echeance) ? Number(echeance) : S.strat.end;
+      const attendu = y1 >= y0 ? clamp((now - yStart(y0)) / (yEnd(y1) - yStart(y0)), 0, 1) * 100 : null;
+      const actif = statut === 'À engager' || statut === 'En cours';
       return {
-        id, refs,
+        id, refs, resultat, code: codeOf(resultat),
         objectif: String(get('objectif', i) ?? '') || 'Sans orientation',
         sousObjectif: String(get('sousObjectif', i) ?? '') || 'Sans sous-objectif',
-        resultat, code: codeOf(resultat),
-        priorite: normPrio(get('priorite', i)),
-        facile: normFac(get('facile', i)),
+        priorite: normPrio(get('priorite', i)), facile: normFac(get('facile', i)),
         groupement: String(get('groupement', i) ?? '').trim(),
-        t0: get('t0', i), anneeT0: get('anneeT0', i), cible: get('cible', i),
-        echeance: get('echeance', i), observation: get('observation', i)
+        t0: get('t0', i), anneeT0, cible: get('cible', i), echeance, observation: get('observation', i),
+        pct, statut, statutStocke: stRaw, dateMaj: dateFromGrist(get('dateMaj', i)),
+        attendu,
+        depassee: actif && !isEmpty(echeance) && Number(echeance) < curYear,
+        retard: actif && attendu !== null && pct + CONFIG.toleranceRetard < attendu
       };
     });
     await loadRefTables([...refTables]);
+    await loadObservations();
+    if (!S.obsCols) banner.insertAdjacentHTML('beforeend', `<div class="banner info">Table ${esc(CONFIG.tableObs)} introuvable ou incomplète (colonnes Strategie, ID_Resultat, Commentaire et Auteur requises) : les commentaires sont désactivés.</div>`);
     rows.forEach(r => {
-      const seen = new Set();
-      r.links = [];
+      const seen = new Set(); r.links = [];
       r.refs.forEach(ref => {
-        let item;
-        if (ref.label) item = {label: ref.label, kind: kindOf(ref.label)};
-        else {
-          const t = ref.t || CONFIG.tableProjets;
-          item = (S.refLabels[t] || {})[ref.id] || {label: '#' + ref.id, kind: 'Non typé'};
-        }
+        const item = ref.label ? {label: ref.label, kind: kindOf(ref.label)}
+          : ((S.refLabels[ref.t || CONFIG.tableProjets] || {})[ref.id] || {label: '#' + ref.id, kind: 'Non typé'});
         if (!seen.has(item.label)){ seen.add(item.label); r.links.push(item); }
       });
       r.nbProjets = r.links.filter(l => l.kind === 'Projet').length;
       r.nbActions = r.links.filter(l => l.kind === 'Action').length;
-      const filled = ['t0','anneeT0','cible','echeance'].filter(k => !isEmpty(r[k])).length;
-      r.etat = filled === 4 ? 'complet' : filled === 0 ? 'vide' : 'partiel';
+      r.comments = S.obs[r.id] || [];
     });
     rows.sort((a, b) => natCmp(a.code || '999', b.code || '999') || a.resultat.localeCompare(b.resultat, 'fr'));
     S.rows = rows;
-    if (!S.selectedId || !rows.some(r => r.id === S.selectedId)) S.selectedId = rows[0]?.id ?? null;
+    if (!rows.some(r => r.id === S.selectedId)) S.selectedId = rows[0]?.id ?? null;
     fillFilterOptions();
     render();
   } catch(e){
-    $('#error').innerHTML = `<div class="error-box">Lecture impossible : ${esc(e.message || e)}. Vérifiez que le widget a l'accès complet au document.</div>`;
+    banner.innerHTML = `<div class="banner">Lecture impossible : ${esc(e.message || e)}. Vérifiez que le widget a l'accès complet au document.</div>`;
   }
+}
+
+/* ---------- historique des commentaires ---------- */
+async function loadObservations(){
+  S.obs = {}; S.obsCols = null;
+  let raw;
+  try {
+    const tables = await grist.docApi.listTables();
+    const t = tables.find(x => norm(x) === norm(CONFIG.tableObs)); if (!t) return;
+    CONFIG.tableObs = t;
+    raw = await grist.docApi.fetchTable(t);
+  } catch(e){ return; }
+  const keys = Object.keys(raw), c = {};
+  for (const [k, cands] of Object.entries(CONFIG.colsObs)) c[k] = resolveCol(keys, cands);
+  if (!c.strategie || !c.idResultat || !c.texte || !c.nom) return;
+  S.obsCols = c;
+  raw.id.forEach((id, i) => {
+    if (raw[c.strategie][i] !== S.strat.id) return;
+    const rid = Number(raw[c.idResultat][i]); if (!rid) return;
+    (S.obs[rid] = S.obs[rid] || []).push({
+      id, texte: String(raw[c.texte][i] ?? ''),
+      email: c.email ? String(raw[c.email][i] ?? '') : '', nom: c.nom ? String(raw[c.nom][i] ?? '') : '',
+      date: c.date ? dateFromGrist(raw[c.date][i]) : null
+    });
+  });
+  Object.values(S.obs).forEach(l => l.sort((a, b) => (b.date || 0) - (a.date || 0) || b.id - a.id));
+}
+async function addComment(){
+  if (!S.obsCols) return;
+  const txt = $('#iCm').value.trim(), auteur = $('#iAu').value.trim();
+  $('#iAu').classList.toggle('invalid', !auteur); $('#iCm').classList.toggle('invalid', !txt);
+  if (!auteur || !txt){ $('#cmStatus').textContent = !auteur ? "Saisissez le nom de l'auteur." : 'Saisissez le commentaire.'; return; }
+  S.auteur = auteur;
+  const r = S.rows.find(x => x.id === S.selectedId), c = S.obsCols, rec = {};
+  rec[c.strategie] = S.strat.id; rec[c.idResultat] = r.id; rec[c.texte] = txt; rec[c.nom] = auteur;
+  if (c.date) rec[c.date] = Date.now() / 1000;
+  if (c.resultat) rec[c.resultat] = r.resultat;
+  $('#addCm').disabled = true; $('#cmStatus').textContent = 'Ajout…';
+  try {
+    await grist.docApi.applyUserActions([['AddRecord', CONFIG.tableObs, null, rec]]);
+    await loadObservations();
+    S.rows.forEach(x => x.comments = S.obs[x.id] || []);
+    // mise à jour du seul fil : les modifications en cours sur l'avancement ne sont pas perdues
+    $('#thread').innerHTML = threadHtml(r); $('#iCm').value = ''; $('#addCm').disabled = true; $('#cmStatus').textContent = 'Commentaire ajouté.';
+  } catch(e){
+    $('#cmStatus').textContent = "Échec de l'ajout : " + (e.message || e); $('#addCm').disabled = false;
+  }
+}
+const dtFr = d => d ? d.toLocaleDateString('fr-FR') + ' à ' + d.toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'}) : 'date inconnue';
+function threadHtml(r){
+  const items = r.comments.map(c => `<li><div class="who"><b>${esc(c.nom || 'Auteur inconnu')}</b>${c.email ? ' (' + esc(c.email) + ')' : ''}, le ${esc(dtFr(c.date))}</div><div class="txt">${esc(c.texte)}</div></li>`);
+  if (!isEmpty(r.observation)) items.push(`<li class="legacy"><div class="who">Observation saisie dans la table, sans auteur ni date</div><div class="txt">${esc(r.observation)}</div></li>`);
+  return items.length ? `<ul class="thread">${items.join('')}</ul>` : '<p class="status">Aucun commentaire pour ce résultat.</p>';
+}
+
+/* ---------- agrégats ---------- */
+function aggregate(rows){
+  const actifs = rows.filter(r => r.statut !== 'Abandonné');
+  let sw = 0, sp = 0;
+  actifs.forEach(r => { const w = S.pond ? (CONFIG.poids[r.priorite] ?? 1) : 1; sw += w; sp += w * r.pct; });
+  const byS = {}; STATUTS.forEach(s => byS[s] = 0); rows.forEach(r => byS[r.statut]++);
+  return {n: rows.length, nActifs: actifs.length, taux: sw ? sp / sw : null, byS};
+}
+function miniBar(rows){
+  const a = aggregate(rows);
+  return `<span class="mini"><span class="pb"><i style="width:${a.taux ?? 0}%"></i></span>${pctTxt(a.taux)}</span>`;
 }
 
 /* ---------- filtres ---------- */
 function fillFilterOptions(){
   const uniq = arr => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr', {numeric: true}));
   const setOpts = (sel, first, vals, cur) => {
+    if (cur && !vals.includes(cur)) cur = '';
     sel.innerHTML = `<option value="">${first}</option>` + vals.map(v => `<option ${v === cur ? 'selected' : ''} value="${esc(v)}">${esc(v)}</option>`).join('');
+    return cur;
   };
-  setOpts($('#fGrp'), 'Groupement : tous', uniq(S.rows.map(r => r.groupement)), S.grp);
-  setOpts($('#fObj'), 'Orientation : toutes', uniq(S.rows.map(r => r.objectif)), S.obj);
+  S.grp = setOpts($('#fGrp'), 'Groupement : tous', uniq(S.rows.map(r => r.groupement)), S.grp);
+  S.obj = setOpts($('#fObj'), 'Orientation : toutes', uniq(S.rows.map(r => r.objectif)), S.obj);
+  S.st = setOpts($('#fSt'), 'Statut : tous', STATUTS, S.st);
 }
 function filtered(){
   const q = norm(S.txt);
   return S.rows.filter(r =>
-    (!S.prios.size || S.prios.has(r.priorite)) &&
-    (!S.grp || r.groupement === S.grp) &&
-    (!S.obj || r.objectif === S.obj) &&
-    (!S.fac || r.facile === S.fac) &&
-    (!q || norm(r.resultat + ' ' + r.sousObjectif + ' ' + (r.observation || '') + ' ' + r.links.map(l => l.label).join(' ')).includes(q))
-  );
+    (!S.prios.size || S.prios.has(r.priorite)) && (!S.grp || r.groupement === S.grp) &&
+    (!S.obj || r.objectif === S.obj) && (!S.fac || r.facile === S.fac) && (!S.st || r.statut === S.st) &&
+    (!q || norm(r.resultat + ' ' + r.sousObjectif + ' ' + (r.observation || '') + ' ' + r.comments.map(c => c.texte + ' ' + c.nom).join(' ') + ' ' + r.links.map(l => l.label).join(' ')).includes(q)));
 }
 
 /* ---------- rendu ---------- */
@@ -351,97 +506,108 @@ function render(){
   if (S.view === 'matrice') renderMatrice(rows);
   if (S.view === 'saisie') renderSaisie(rows);
 }
-
-function prioBadge(p){ return p ? `<span class="badge ${p}">${p}</span>` : `<span class="badge nd">Sans priorité</span>`; }
+const prioBadge = p => p ? `<span class="badge ${p}">${p}</span>` : `<span class="badge nd">Sans priorité</span>`;
+const stBadge = s => `<span class="st" style="--c:${ST_COLOR[s]}">${esc(s)}</span>`;
 function indicText(r){
-  if (r.etat === 'vide') return 'Indicateur non renseigné';
+  if ([r.t0, r.anneeT0, r.cible, r.echeance].every(isEmpty)) return '';
   return `T0 ${fmt(r.t0)}${isEmpty(r.anneeT0) ? '' : ' (' + r.anneeT0 + ')'} → cible ${fmt(r.cible)}${isEmpty(r.echeance) ? '' : ' en ' + r.echeance}`;
 }
 function linksLabel(r){
-  const n = r.links.length;
-  if (!n) return 'Aucun projet ni action';
-  const parts = [];
-  if (r.nbProjets) parts.push(`${r.nbProjets} projet${r.nbProjets > 1 ? 's' : ''}`);
-  if (r.nbActions) parts.push(`${r.nbActions} action${r.nbActions > 1 ? 's' : ''}`);
-  const other = n - r.nbProjets - r.nbActions;
-  if (other) parts.push(`${other} autre${other > 1 ? 's' : ''}`);
-  return parts.join(', ');
+  const n = r.links.length; if (!n) return 'Aucun projet ni action';
+  const p = [];
+  if (r.nbProjets) p.push(`${r.nbProjets} projet${r.nbProjets > 1 ? 's' : ''}`);
+  if (r.nbActions) p.push(`${r.nbActions} action${r.nbActions > 1 ? 's' : ''}`);
+  const o = n - r.nbProjets - r.nbActions; if (o) p.push(`${o} autre${o > 1 ? 's' : ''}`);
+  return p.join(', ');
+}
+function alertTags(r){
+  return (r.depassee ? `<span class="tag late">Échéance ${r.echeance} dépassée</span>` : '')
+       + (!r.depassee && r.retard ? `<span class="tag late" title="Rythme attendu à date : ${Math.round(r.attendu)} %">En retard</span>` : '');
 }
 
 function renderPilotage(rows){
   const el = $('#v-pilotage');
   if (!rows.length){ el.innerHTML = `<div class="empty">Aucun résultat attendu ne correspond aux filtres. Modifiez ou réinitialisez les filtres.</div>`; return; }
-  const n = rows.length;
-  const byP = {P1:0, P2:0, P3:0, '':0}; rows.forEach(r => byP[r.priorite]++);
-  const complets = rows.filter(r => r.etat === 'complet').length;
+  const a = aggregate(rows);
+  const s = S.strat;
+  const temps = clamp((Date.now() - yStart(s.start)) / (yEnd(s.end) - yStart(s.start)), 0, 1) * 100;
+  const ecart = a.taux === null ? null : a.taux - temps;
+  const late = rows.filter(r => r.retard || r.depassee).length;
   const sansLien = rows.filter(r => !r.links.length).length;
   const distinct = new Map(); rows.forEach(r => r.links.forEach(l => distinct.set(l.label, l.kind)));
-  const dP = [...distinct.values()].filter(k => k === 'Projet').length;
-  const dA = [...distinct.values()].filter(k => k === 'Action').length;
-  const curYear = new Date().getFullYear();
-  const echus = rows.filter(r => !isEmpty(r.echeance) && Number(r.echeance) <= curYear).length;
+  const dP = [...distinct.values()].filter(k => k === 'Projet').length, dA = [...distinct.values()].filter(k => k === 'Action').length;
+  const lastMaj = rows.reduce((m, r) => r.dateMaj && (!m || r.dateMaj > m) ? r.dateMaj : m, null);
+  const jamais = S.colIds.dateMaj ? rows.filter(r => !r.dateMaj).length : null;
 
-  const bar = ['P1','P2','P3'].map(p => byP[p] ? `<i style="width:${byP[p]/n*100}%;background:${PRIO_COLOR[p]}" title="${p} : ${byP[p]}"></i>` : '').join('')
-            + (byP[''] ? `<i style="width:${byP['']/n*100}%;background:var(--none)" title="Sans priorité : ${byP['']}"></i>` : '');
-
-  let html = `<div class="kpis">
-    <div class="kpi"><b>${n}</b><span>résultats attendus</span><div class="bar">${bar}</div>
-      <span>P1 ${byP.P1} · P2 ${byP.P2} · P3 ${byP.P3}${byP[''] ? ' · sans priorité ' + byP[''] : ''}</span></div>
-    <div class="kpi"><b>${complets} / ${n}</b><span>indicateurs complets (T0, année, cible, échéance)</span></div>
-    <div class="kpi"><b>${distinct.size}</b><span>projets et actions liés distincts<br>${dP} projet${dP > 1 ? 's' : ''}, ${dA} action${dA > 1 ? 's' : ''}</span></div>
+  let html = `<div class="hero">
+    <div class="big">${pctTxt(a.taux)}<small>de réalisation${S.pond ? ' (pondérée)' : ''}</small></div>
+    <div>
+      <div class="gauge" role="img" aria-label="Réalisation ${pctTxt(a.taux)}, temps écoulé ${Math.round(temps)} %">
+        <div class="fill" style="width:${a.taux ?? 0}%"></div><div class="time" style="left:${temps}%"></div></div>
+      <div class="gauge-legend"><span>${s.start}</span>
+        <span>Temps écoulé : ${Math.round(temps)} % de la période ${s.start}-${s.end}${ecart === null ? '' :
+          `, écart : <span class="${ecart >= 0 ? 'gap-ok' : 'gap-ko'}">${ecart >= 0 ? '+' : ''}${Math.round(ecart)} pts</span>`}</span><span>${s.end}</span></div>
+      <div class="stack">${STATUTS.map(st => a.byS[st] ? `<i style="width:${a.byS[st] / a.n * 100}%;background:${ST_COLOR[st]}" title="${st} : ${a.byS[st]}"></i>` : '').join('')}</div>
+      <div class="legend">${STATUTS.map(st => `<span style="--c:${ST_COLOR[st]}">${st} : ${a.byS[st]}</span>`).join('')}</div>
+    </div></div>
+  <div class="kpis">
+    <div class="kpi"><b>${a.n}</b><span>résultats attendus${a.byS['Abandonné'] ? `, dont ${a.byS['Abandonné']} abandonné${a.byS['Abandonné'] > 1 ? 's' : ''} (exclus du taux)` : ''}</span></div>
+    <div class="kpi ${late ? 'alert' : ''}"><b>${late}</b><span>en retard ou échéance dépassée</span></div>
+    <div class="kpi"><b>${distinct.size}</b><span>projets et actions liés distincts : ${dP} projet${dP > 1 ? 's' : ''}, ${dA} action${dA > 1 ? 's' : ''}</span></div>
     <div class="kpi ${sansLien ? 'alert' : ''}"><b>${sansLien}</b><span>résultats sans projet ni action</span></div>
-    <div class="kpi"><b>${echus}</b><span>échéance en ${curYear} ou avant</span></div>
+    <div class="kpi"><b>${dFr(lastMaj)}</b><span>dernière mise à jour${jamais ? `, ${jamais} jamais évalué${jamais > 1 ? 's' : ''}` : ''}</span></div>
   </div><div class="two"><div class="panel">`;
 
-  let lastO = null, lastS = null;
-  rows.forEach(r => {
-    if (r.objectif !== lastO){ html += `<div class="obj">${esc(r.objectif)}</div>`; lastO = r.objectif; lastS = null; }
-    if (r.sousObjectif !== lastS){ html += `<div class="sobj">${esc(r.sousObjectif)}</div>`; lastS = r.sousObjectif; }
-    const open = S.openLinks.has(r.id);
-    html += `<div class="row">
-      <span class="dot ${r.etat}" title="Indicateur ${r.etat}"></span>
-      <div><div class="title" data-edit="${r.id}" title="Ouvrir la saisie">${esc(r.resultat)}</div>
-        <div class="meta">${prioBadge(r.priorite)}
-          ${r.facile ? `<span class="tag">Facile : ${r.facile.toLowerCase()}</span>` : ''}
-          ${r.groupement ? `<span class="tag">${esc(r.groupement)}</span>` : ''}
-          <span>${esc(indicText(r))}</span></div></div>
-      <button class="links-btn ${r.links.length ? '' : 'zero'}" data-links="${r.id}" aria-expanded="${open}" ${r.links.length ? '' : 'disabled'}>${esc(linksLabel(r))}</button>
-      ${open ? `<ul class="links">${r.links.map(l => `<li>${esc(l.label)}<span class="kind">${esc(l.kind)}</span></li>`).join('')}</ul>` : ''}
-    </div>`;
-  });
+  const byObj = groupBy(rows, r => r.objectif);
+  for (const [obj, oRows] of byObj){
+    html += `<div class="obj"><span>${esc(obj)}</span>${miniBar(oRows)}</div>`;
+    for (const [so, sRows] of groupBy(oRows, r => r.sousObjectif)){
+      html += `<div class="sobj"><span>${esc(so)}</span>${miniBar(sRows)}</div>`;
+      sRows.forEach(r => {
+        const open = S.openLinks.has(r.id);
+        html += `<div class="row">
+          <div><div class="title" data-edit="${r.id}" title="Ouvrir la saisie">${esc(r.resultat)}</div>
+            <div class="meta">${prioBadge(r.priorite)}${r.facile ? `<span class="tag">Facile : ${r.facile.toLowerCase()}</span>` : ''}
+              ${r.groupement ? `<span class="tag">${esc(r.groupement)}</span>` : ''}${alertTags(r)}
+              ${r.comments.length ? `<span class="tag" title="${esc(r.comments[0].texte.slice(0, 200))}">${r.comments.length} commentaire${r.comments.length > 1 ? 's' : ''}, dernier le ${dFr(r.comments[0].date)}</span>` : ''}
+              ${indicText(r) ? `<span>${esc(indicText(r))}</span>` : ''}</div></div>
+          <div class="prog" style="--c:${ST_COLOR[r.statut]}">${stBadge(r.statut)}<span class="pb"><i style="width:${r.pct}%"></i></span><b>${pctTxt(r.pct)}</b></div>
+          <button class="links-btn ${r.links.length ? '' : 'zero'}" data-links="${r.id}" aria-expanded="${open}" ${r.links.length ? '' : 'disabled'}>${esc(linksLabel(r))}</button>
+          ${open ? `<ul class="links">${r.links.map(l => `<li>${esc(l.label)}<span class="kind">${esc(l.kind)}</span></li>`).join('')}</ul>` : ''}
+        </div>`;
+      });
+    }
+  }
   html += `</div><div class="panel"><h2>Par groupement pilote</h2>${groupTable(rows)}</div></div>`;
   el.innerHTML = html;
 }
-
+function groupBy(rows, fn){ const m = new Map(); rows.forEach(r => { const k = fn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }); return m; }
 function groupTable(rows){
-  const g = {};
-  rows.forEach(r => {
-    const k = r.groupement || 'Non renseigné';
-    g[k] = g[k] || {n:0, P1:0, P2:0, P3:0, liens:new Set(), sans:0};
-    g[k].n++; if (r.priorite) g[k][r.priorite]++;
-    r.links.forEach(l => g[k].liens.add(l.label)); if (!r.links.length) g[k].sans++;
-  });
-  const keys = Object.keys(g).sort((a, b) => g[b].n - g[a].n || a.localeCompare(b, 'fr'));
-  return `<table class="grp"><thead><tr><th>Groupement</th><th>Résultats</th><th>P1</th><th>P2</th><th>P3</th><th>Proj./act.</th><th>Sans lien</th></tr></thead><tbody>
-    ${keys.map(k => `<tr><td>${esc(k)}</td><td>${g[k].n}</td><td>${g[k].P1}</td><td>${g[k].P2}</td><td>${g[k].P3}</td><td>${g[k].liens.size}</td><td>${g[k].sans}</td></tr>`).join('')}
+  const g = groupBy(rows, r => r.groupement || 'Non renseigné');
+  const keys = [...g.keys()].sort((a, b) => g.get(b).length - g.get(a).length || a.localeCompare(b, 'fr'));
+  return `<table class="grp"><thead><tr><th>Groupement</th><th>Rés.</th><th>Réalisation</th><th>Réalisés</th><th>En cours</th><th>À engager</th><th>Aband.</th><th>Proj./act.</th></tr></thead><tbody>
+    ${keys.map(k => { const rs = g.get(k), a = aggregate(rs), l = new Set(); rs.forEach(r => r.links.forEach(x => l.add(x.label)));
+      return `<tr><td>${esc(k)}</td><td>${a.n}</td><td><b>${pctTxt(a.taux)}</b></td><td>${a.byS['Réalisé']}</td><td>${a.byS['En cours']}</td><td>${a.byS['À engager']}</td><td>${a.byS['Abandonné']}</td><td>${l.size}</td></tr>`; }).join('')}
   </tbody></table>`;
 }
 
 function renderMatrice(rows){
   const el = $('#v-matrice');
-  const cardHtml = r => `<button class="card" data-edit="${r.id}"><strong>${esc(r.code || '—')}</strong> ${esc(r.resultat.replace(/^\s*[\d.]+\s*/, '').slice(0, 90))}${r.resultat.length > 90 ? '…' : ''}
-    <small>${esc(r.groupement || 'Groupement non renseigné')}, ${esc(linksLabel(r).toLowerCase())}</small></button>`;
+  const card = r => `<button class="card" data-edit="${r.id}" style="--c:${ST_COLOR[r.statut]}">
+      <span><strong>${esc(r.code || '—')}</strong> ${esc(r.resultat.replace(/^\s*[\d.]+\s*/, '').slice(0, 90))}${r.resultat.length > 90 ? '…' : ''}
+      <small>${esc(r.groupement || 'Groupement non renseigné')}, ${esc(r.statut.toLowerCase())}, ${esc(linksLabel(r).toLowerCase())}</small></span>
+      <span class="pct">${pctTxt(r.pct)}</span></button>`;
   let html = `<div class="matrix"><div></div><div class="mhead">Facile à atteindre</div><div class="mhead">Difficile à atteindre</div>`;
   ['P1','P2','P3'].forEach(p => {
     html += `<div class="mrow ${p}">${p}</div>`;
     ['Oui','Non'].forEach(f => {
-      const items = rows.filter(r => r.priorite === p && r.facile === f);
-      html += `<div class="cell ${p} ${f.toLowerCase()}"><header><strong>${MATRICE[p + '|' + f]}</strong><em>${items.length}</em></header>${items.map(cardHtml).join('')}</div>`;
+      const items = rows.filter(r => r.priorite === p && r.facile === f), a = aggregate(items);
+      html += `<div class="cell"><div class="ch"><strong>${MATRICE[p + '|' + f]}</strong><em>${items.length} résultat${items.length > 1 ? 's' : ''}${items.length ? ', ' + pctTxt(a.taux) : ''}</em></div>${items.map(card).join('')}</div>`;
     });
   });
   html += `</div>`;
   const unq = rows.filter(r => !r.priorite || !r.facile);
-  if (unq.length) html += `<div class="panel unq"><h2>À qualifier (priorité ou facilité manquante) : ${unq.length}</h2><div style="padding:8px">${unq.map(cardHtml).join('')}</div></div>`;
+  if (unq.length) html += `<div class="panel unq"><h2>À qualifier (priorité ou facilité manquante) : ${unq.length}</h2><div style="padding:8px">${unq.map(card).join('')}</div></div>`;
   el.innerHTML = html;
 }
 
@@ -451,19 +617,42 @@ function renderSaisie(rows){
   if (!rows.some(r => r.id === S.selectedId)) S.selectedId = rows[0].id;
   const r = S.rows.find(x => x.id === S.selectedId);
   const v = x => isEmpty(x) ? '' : esc(x);
+  const canAv = S.colIds.avancement && S.colIds.statut;
   el.innerHTML = `<div class="edit">
-    <div class="panel list">${rows.map(x => `<button class="item" data-select="${x.id}" aria-current="${x.id === r.id}">
-      <span class="dot ${x.etat}"></span><span>${esc(x.resultat.slice(0, 110))}${x.resultat.length > 110 ? '…' : ''}</span></button>`).join('')}</div>
+    <div class="panel list">${rows.map(x => `<button class="item" data-select="${x.id}" aria-current="${x.id === r.id}" style="--c:${ST_COLOR[x.statut]}">
+      <b>${pctTxt(x.pct)}</b><span>${esc(x.resultat.slice(0, 110))}${x.resultat.length > 110 ? '…' : ''}</span></button>`).join('')}</div>
     <div class="panel form">
       <h3>${esc(r.resultat)}</h3>
       <div class="ctx">${esc(r.objectif)} › ${esc(r.sousObjectif)}<br>${prioBadge(r.priorite)} ${r.facile ? 'Facile : ' + r.facile.toLowerCase() + ', ' : ''}${esc(r.groupement || 'groupement non renseigné')}, ${esc(linksLabel(r).toLowerCase())}</div>
-      <div class="grid">
-        <label>Valeur T0<input id="iT0" inputmode="decimal" value="${v(r.t0)}"></label>
-        <label>Année T0<input id="iAn" inputmode="numeric" maxlength="4" value="${v(r.anneeT0)}"></label>
-        <label>Cible<input id="iCi" inputmode="decimal" value="${v(r.cible)}"></label>
-        <label>Échéance (année)<input id="iEc" inputmode="numeric" maxlength="4" value="${v(r.echeance)}"></label>
-        <label class="full">Observation<textarea id="iOb">${v(r.observation)}</textarea></label>
-      </div>
+      <fieldset ${canAv ? '' : 'disabled'}><legend>Réalisation</legend>
+        ${canAv ? '' : '<p class="status">Suivi indisponible : colonnes Avancement et Statut absentes de la table.</p>'}
+        <div class="avc">
+          <input type="range" id="iPr" min="0" max="100" step="5" value="${Math.round(r.pct)}" aria-label="Avancement">
+          <input type="number" id="iPn" min="0" max="100" step="1" value="${Math.round(r.pct)}" aria-label="Avancement en %">
+          <span id="stPrev"></span>
+        </div>
+        <div class="avc-foot">
+          <label class="check"><input type="checkbox" id="iAb" ${r.statut === 'Abandonné' ? 'checked' : ''}> Abandonné</label>
+          <span class="status">${r.attendu !== null && r.statut !== 'Abandonné' ? `Rythme attendu à date : ${Math.round(r.attendu)} %` : ''}</span>
+          <span class="status">Dernière mise à jour : ${dFr(r.dateMaj)}</span>
+        </div>
+      </fieldset>
+      <fieldset><legend>Indicateur</legend>
+        <div class="grid">
+          <label class="f">Valeur T0<input id="iT0" inputmode="decimal" value="${v(r.t0)}"></label>
+          <label class="f">Année T0<input id="iAn" inputmode="numeric" maxlength="4" value="${v(r.anneeT0)}"></label>
+          <label class="f">Cible<input id="iCi" inputmode="decimal" value="${v(r.cible)}"></label>
+          <label class="f">Échéance (année)<input id="iEc" inputmode="numeric" maxlength="4" value="${v(r.echeance)}"></label>
+        </div>
+      </fieldset>
+      <fieldset><legend>Commentaires</legend>
+        <div id="thread">${threadHtml(r)}</div>
+        ${S.obsCols ? `<div class="addc">
+          <label class="f">Auteur (obligatoire)<input id="iAu" value="${esc(S.auteur)}" placeholder="Prénom NOM" autocomplete="name"></label>
+          <textarea id="iCm" placeholder="Nouveau commentaire…" aria-label="Nouveau commentaire"></textarea>
+          <span><button class="btn ghost" id="addCm" disabled>Ajouter le commentaire</button> <span class="status" id="cmStatus"></span></span></div>`
+          : '<p class="status">Commentaires indisponibles : table Observations absente.</p>'}
+      </fieldset>
       <ul class="msgs" id="msgs"></ul>
       <div class="actions">
         <button class="btn" id="save" disabled>Enregistrer</button>
@@ -472,19 +661,32 @@ function renderSaisie(rows){
       </div>
     </div></div>`;
   S.dirty = false;
-  ['iT0','iAn','iCi','iEc','iOb'].forEach(id => $('#' + id).addEventListener('input', () => { S.dirty = true; validate(); }));
+  const touch = () => { S.dirty = true; validate(); };
+  $('#iPr').addEventListener('input', e => { $('#iPn').value = e.target.value; touch(); });
+  $('#iPn').addEventListener('input', e => { const n = Number(e.target.value); if (!isNaN(n)) $('#iPr').value = clamp(n, 0, 100); touch(); });
+  $('#iAb').addEventListener('change', touch);
+  ['iT0','iAn','iCi','iEc'].forEach(id => $('#' + id).addEventListener('input', touch));
+  if ($('#iCm')){
+    const okCm = () => { $('#addCm').disabled = !$('#iCm').value.trim() || !$('#iAu').value.trim(); $('#cmStatus').textContent = ''; };
+    ['iCm','iAu'].forEach(id => $('#' + id).addEventListener('input', e => { e.target.classList.remove('invalid'); okCm(); }));
+    $('#addCm').addEventListener('click', addComment);
+  }
   $('#save').addEventListener('click', save);
   $('#cancel').addEventListener('click', () => renderSaisie(filtered()));
-  validate(); $('#save').disabled = true; $('#cancel').disabled = true;
+  validate();
 }
 
-/* ---------- saisie : contrôle et enregistrement ---------- */
+/* ---------- contrôle et enregistrement ---------- */
 function parseNum(s){ s = s.trim().replace(/\s/g, '').replace(',', '.'); if (!s) return null; const n = Number(s); return isNaN(n) ? NaN : n; }
 function parseYear(s){ s = s.trim(); if (!s) return null; return /^\d{4}$/.test(s) && +s >= 1990 && +s <= 2100 ? +s : NaN; }
 function validate(){
-  const f = {t0: parseNum($('#iT0').value), an: parseYear($('#iAn').value), ci: parseNum($('#iCi').value), ec: parseYear($('#iEc').value)};
+  const pRaw = $('#iPn').value.trim();
+  const f = {pct: pRaw === '' ? 0 : Number(pRaw), ab: $('#iAb').checked,
+             t0: parseNum($('#iT0').value), an: parseYear($('#iAn').value), ci: parseNum($('#iCi').value), ec: parseYear($('#iEc').value)};
   const err = [], wrn = [];
   const mark = (id, bad) => $('#' + id).classList.toggle('invalid', bad);
+  const pBad = !Number.isInteger(f.pct) || f.pct < 0 || f.pct > 100;
+  mark('iPn', pBad); if (pBad) err.push('Avancement : saisissez un nombre entier entre 0 et 100.');
   mark('iT0', Number.isNaN(f.t0)); if (Number.isNaN(f.t0)) err.push('Valeur T0 : saisissez un nombre.');
   mark('iCi', Number.isNaN(f.ci)); if (Number.isNaN(f.ci)) err.push('Cible : saisissez un nombre.');
   mark('iAn', Number.isNaN(f.an)); if (Number.isNaN(f.an)) err.push('Année T0 : saisissez une année sur 4 chiffres.');
@@ -492,10 +694,10 @@ function validate(){
   if (typeof f.an === 'number' && typeof f.ec === 'number' && !isNaN(f.an) && !isNaN(f.ec) && f.ec <= f.an){
     err.push("L'échéance doit être postérieure à l'année T0."); mark('iEc', true);
   }
-  if (f.t0 !== null && f.an === null) wrn.push("Valeur T0 saisie sans son année de référence.");
-  if (f.t0 !== null && f.ci === null) wrn.push("Valeur T0 saisie sans cible.");
-  if (f.ci !== null && f.ec === null) wrn.push("Cible saisie sans échéance.");
-  if (f.t0 !== null && f.ci !== null && !isNaN(f.t0) && f.t0 === f.ci) wrn.push("La cible est égale à la valeur T0.");
+  if (f.t0 !== null && f.ci === null) wrn.push('Valeur T0 saisie sans cible.');
+  if (f.ci !== null && f.ec === null) wrn.push('Cible saisie sans échéance.');
+  f.statut = f.ab ? 'Abandonné' : statutAuto(pBad ? 0 : f.pct);
+  $('#stPrev').innerHTML = stBadge(f.statut);
   $('#msgs').innerHTML = err.map(m => `<li class="err">${esc(m)}</li>`).join('') + wrn.map(m => `<li class="wrn">${esc(m)}</li>`).join('');
   $('#save').disabled = !S.dirty || err.length > 0;
   $('#cancel').disabled = !S.dirty;
@@ -503,38 +705,51 @@ function validate(){
 }
 async function save(){
   const {ok, f} = validate(); if (!ok) return;
+  const r = S.rows.find(x => x.id === S.selectedId);
   const c = S.colIds, fields = {};
   if (c.t0) fields[c.t0] = f.t0;
   if (c.anneeT0) fields[c.anneeT0] = f.an;
   if (c.cible) fields[c.cible] = f.ci;
   if (c.echeance) fields[c.echeance] = f.ec;
-  if (c.observation) fields[c.observation] = $('#iOb').value.trim() || null;
+  if (c.avancement && c.statut){
+    fields[c.avancement] = f.pct / 100;
+    fields[c.statut] = f.statut;
+    const changed = Math.round(r.pct) !== f.pct || r.statutStocke !== f.statut;
+    if (c.dateMaj && changed){ const d = new Date(); fields[c.dateMaj] = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 1000; }
+  }
   $('#save').disabled = true; $('#status').textContent = 'Enregistrement…';
   try {
-    await grist.docApi.applyUserActions([['UpdateRecord', S.tableId, S.selectedId, fields]]);
-    S.dirty = false;
-    $('#status').textContent = 'Enregistré.';
+    await grist.docApi.applyUserActions([['UpdateRecord', S.strat.id, S.selectedId, fields]]);
+    S.dirty = false; $('#status').textContent = 'Enregistré.';
+    await load();
   } catch(e){
-    $('#status').textContent = 'Échec de l\'enregistrement : ' + (e.message || e);
+    $('#status').textContent = "Échec de l'enregistrement : " + (e.message || e);
     $('#save').disabled = false;
   }
 }
 
-/* ---------- navigation et interactions ---------- */
-function confirmLeave(){ return !S.dirty || confirm('Des modifications ne sont pas enregistrées. Les abandonner ?'); }
+/* ---------- navigation ---------- */
+const confirmLeave = () => !S.dirty || confirm('Des modifications ne sont pas enregistrées. Les abandonner ?');
 function setView(v){
   if (S.view === 'saisie' && v !== 'saisie' && !confirmLeave()) return;
-  S.view = v;
+  S.view = v; S.dirty = false;
   document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.view === v));
   document.querySelectorAll('.view').forEach(s => s.classList.toggle('active', s.id === 'v-' + v));
-  S.dirty = false; render();
+  render();
 }
 function selectRow(id, openEdit){
   if (S.view === 'saisie' && id !== S.selectedId && !confirmLeave()) return;
   S.selectedId = id; S.dirty = false;
-  try { grist.setCursorPos({rowId: id}); } catch(e){}
+  if (S.attached === S.strat.id){ try { grist.setCursorPos({rowId: id}); } catch(e){} }
   if (openEdit && S.view !== 'saisie') setView('saisie'); else render();
 }
+$('#strat').addEventListener('change', async e => {
+  if (!confirmLeave()){ e.target.value = S.strat.id; return; }
+  S.strat = S.strategies.find(s => s.id === e.target.value); S.selectedId = null; S.openLinks.clear(); S.dirty = false;
+  try { await grist.setOption('strategie', S.strat.id); } catch(err){}
+  load();
+});
+$('#refresh').addEventListener('click', () => { if (confirmLeave()){ S.dirty = false; S.refLabels = {}; load(); } });
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setView(t.dataset.view)));
 document.querySelectorAll('.chip').forEach(ch => ch.addEventListener('click', () => {
   const p = ch.dataset.prio; S.prios.has(p) ? S.prios.delete(p) : S.prios.add(p);
@@ -543,11 +758,13 @@ document.querySelectorAll('.chip').forEach(ch => ch.addEventListener('click', ()
 $('#fGrp').addEventListener('change', e => { S.grp = e.target.value; render(); });
 $('#fObj').addEventListener('change', e => { S.obj = e.target.value; render(); });
 $('#fFac').addEventListener('change', e => { S.fac = e.target.value; render(); });
+$('#fSt').addEventListener('change', e => { S.st = e.target.value; render(); });
 $('#fTxt').addEventListener('input', e => { S.txt = e.target.value; render(); });
+$('#fPond').addEventListener('change', e => { S.pond = e.target.checked; render(); });
 $('#reset').addEventListener('click', () => {
-  S.prios.clear(); S.grp = S.obj = S.fac = S.txt = '';
+  S.prios.clear(); S.grp = S.obj = S.fac = S.st = S.txt = '';
   document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', 'false'));
-  $('#fGrp').value = $('#fObj').value = $('#fFac').value = $('#fTxt').value = '';
+  $('#fGrp').value = $('#fObj').value = $('#fFac').value = $('#fSt').value = $('#fTxt').value = '';
   render();
 });
 document.querySelector('main').addEventListener('click', e => {
@@ -559,11 +776,12 @@ document.querySelector('main').addEventListener('click', e => {
 
 /* ---------- branchement Grist ---------- */
 let timer = null;
-const reload = () => { clearTimeout(timer); timer = setTimeout(() => { if (!S.dirty) load(); }, 250); };
+const reload = () => { clearTimeout(timer); timer = setTimeout(() => { if (!S.dirty) load(); }, 300); };
 grist.ready({requiredAccess: 'full'});
-grist.onRecords(reload);
+(async () => { try { S.attached = await grist.getSelectedTableId(); } catch(e){} load(); })();
+grist.onRecords(reload);  // se rafraîchit quand la table à laquelle le widget est rattaché change
 grist.onRecord(rec => {
-  if (!rec || rec.id === S.selectedId || S.dirty) return;
+  if (!rec || S.attached !== S.strat?.id || rec.id === S.selectedId || S.dirty) return;
   S.selectedId = rec.id; if (S.view === 'saisie') render();
 });
 </script>
