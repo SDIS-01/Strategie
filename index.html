@@ -177,7 +177,6 @@ textarea{min-height:70px;resize:vertical}
     </select>
     <select id="fSt" aria-label="Statut"></select>
     <input id="fTxt" type="search" placeholder="Rechercher…" aria-label="Rechercher">
-    <label class="check"><input type="checkbox" id="fPond"> Pondérer par priorité</label>
     <button class="reset" id="reset">Réinitialiser</button>
     <span class="count" id="count"></span>
   </div>
@@ -223,7 +222,6 @@ const CONFIG = {
   tableProjets: 'Liste_PEPS_AV',
   colLibelleProjet: ['ID_Projet_Action', 'ID_Projet_Action_AV', 'Libelle', 'Intitule', 'Nom'],
   colTypeProjet: ['Nature', 'Type', 'Nature_Action', 'Type_Projet_Action'],
-  poids: {P1: 3, P2: 2, P3: 1, '': 1},
   toleranceRetard: 15  // points de % sous le rythme attendu avant de signaler un retard
 };
 
@@ -270,8 +268,8 @@ const dFr = d => d ? d.toLocaleDateString('fr-FR') : '—';
 /* ---------- état ---------- */
 const S = {
   strategies: [], strat: null, colIds: {}, rows: [], refLabels: {}, attached: null,
-  view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', st: '', txt: '', pond: false,
-  selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: ''
+  view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', st: '', txt: '',
+  selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: '', meta: null, refCache: {}
 };
 
 /* ---------- stratégies disponibles ---------- */
@@ -314,6 +312,31 @@ function kindOf(label, typeVal){
   if (m){ const c = m[1].toUpperCase(); if (c === 'P') return 'Projet'; if (['A','AV','MEO'].includes(c)) return 'Action'; }
   return 'Non typé';
 }
+/* ---------- colonnes de type Référence : affichage du libellé au lieu de l'identifiant ---------- */
+async function loadMeta(){
+  if (S.meta) return S.meta;
+  const t = await grist.docApi.fetchTable('_grist_Tables');
+  const c = await grist.docApi.fetchTable('_grist_Tables_column');
+  const tables = {}; t.id.forEach((id, i) => tables[id] = t.tableId[i]);
+  const cols = c.id.map((id, i) => ({id, table: tables[c.parentId[i]], colId: c.colId[i], type: c.type[i], visibleCol: c.visibleCol[i]}));
+  return S.meta = {cols, byId: Object.fromEntries(cols.map(x => [x.id, x]))};
+}
+async function refResolver(tableId, colId){
+  try {
+    const m = await loadMeta();
+    const col = m.cols.find(x => x.table === tableId && x.colId === colId);
+    const tm = col && String(col.type).match(/^Ref(?:List)?:(.+)$/); if (!tm) return null;
+    const target = tm[1];
+    S.refCache[target] = S.refCache[target] || await grist.docApi.fetchTable(target);
+    const raw = S.refCache[target];
+    let lab = col.visibleCol && m.byId[col.visibleCol] ? m.byId[col.visibleCol].colId : null;
+    if (!lab || !raw[lab]) lab = Object.keys(raw).find(k => k !== 'id' && k !== 'manualSort' && !k.startsWith('gristHelper') && raw[k].some(v => typeof v === 'string' && v.trim()));
+    const map = {}; raw.id.forEach((id, i) => map[id] = lab ? raw[lab][i] : id);
+    const one = v => (typeof v === 'number' ? (v > 0 ? map[v] ?? '' : '') : v);
+    return v => Array.isArray(v) && v[0] === 'L' ? v.slice(1).map(one).filter(x => x !== '').join(', ') : one(v);
+  } catch(e){ return null; }
+}
+
 async function loadRefTables(tables){
   for (const t of tables){
     if (S.refLabels[t]) continue;
@@ -359,7 +382,11 @@ async function load(){
     banner.innerHTML = missing.length
       ? `<div class="banner">Colonnes introuvables dans ${esc(S.strat.id)} : ${missing.map(k => esc(CONFIG.cols[k][0])).join(', ')}. Créez-les ou ajustez CONFIG.cols en tête du widget.</div>` : '';
 
-    const get = (k, i) => S.colIds[k] ? raw[S.colIds[k]][i] : null;
+    const resolvers = {};
+    for (const k of ['objectif', 'sousObjectif', 'resultat', 'priorite', 'facile', 'groupement']){
+      if (S.colIds[k]) resolvers[k] = await refResolver(S.strat.id, S.colIds[k]);
+    }
+    const get = (k, i) => { if (!S.colIds[k]) return null; const v = raw[S.colIds[k]][i]; return resolvers[k] ? resolvers[k](v) : v; };
     const refTables = new Set();
     const now = Date.now(), curYear = new Date().getFullYear();
     const rows = raw.id.map((id, i) => {
@@ -469,7 +496,7 @@ function threadHtml(r){
 function aggregate(rows){
   const actifs = rows.filter(r => r.statut !== 'Abandonné');
   let sw = 0, sp = 0;
-  actifs.forEach(r => { const w = S.pond ? (CONFIG.poids[r.priorite] ?? 1) : 1; sw += w; sp += w * r.pct; });
+  actifs.forEach(r => { sw += 1; sp += r.pct; });
   const byS = {}; STATUTS.forEach(s => byS[s] = 0); rows.forEach(r => byS[r.statut]++);
   return {n: rows.length, nActifs: actifs.length, taux: sw ? sp / sw : null, byS};
 }
@@ -532,15 +559,12 @@ function renderPilotage(rows){
   const s = S.strat;
   const temps = clamp((Date.now() - yStart(s.start)) / (yEnd(s.end) - yStart(s.start)), 0, 1) * 100;
   const ecart = a.taux === null ? null : a.taux - temps;
-  const late = rows.filter(r => r.retard || r.depassee).length;
   const sansLien = rows.filter(r => !r.links.length).length;
-  const distinct = new Map(); rows.forEach(r => r.links.forEach(l => distinct.set(l.label, l.kind)));
-  const dP = [...distinct.values()].filter(k => k === 'Projet').length, dA = [...distinct.values()].filter(k => k === 'Action').length;
   const lastMaj = rows.reduce((m, r) => r.dateMaj && (!m || r.dateMaj > m) ? r.dateMaj : m, null);
   const jamais = S.colIds.dateMaj ? rows.filter(r => !r.dateMaj).length : null;
 
   let html = `<div class="hero">
-    <div class="big">${pctTxt(a.taux)}<small>de réalisation${S.pond ? ' (pondérée)' : ''}</small></div>
+    <div class="big">${pctTxt(a.taux)}<small>de réalisation</small></div>
     <div>
       <div class="gauge" role="img" aria-label="Réalisation ${pctTxt(a.taux)}, temps écoulé ${Math.round(temps)} %">
         <div class="fill" style="width:${a.taux ?? 0}%"></div><div class="time" style="left:${temps}%"></div></div>
@@ -552,11 +576,9 @@ function renderPilotage(rows){
     </div></div>
   <div class="kpis">
     <div class="kpi"><b>${a.n}</b><span>résultats attendus${a.byS['Abandonné'] ? `, dont ${a.byS['Abandonné']} abandonné${a.byS['Abandonné'] > 1 ? 's' : ''} (exclus du taux)` : ''}</span></div>
-    <div class="kpi ${late ? 'alert' : ''}"><b>${late}</b><span>en retard ou échéance dépassée</span></div>
-    <div class="kpi"><b>${distinct.size}</b><span>projets et actions liés distincts : ${dP} projet${dP > 1 ? 's' : ''}, ${dA} action${dA > 1 ? 's' : ''}</span></div>
     <div class="kpi ${sansLien ? 'alert' : ''}"><b>${sansLien}</b><span>résultats sans projet ni action</span></div>
     <div class="kpi"><b>${dFr(lastMaj)}</b><span>dernière mise à jour${jamais ? `, ${jamais} jamais évalué${jamais > 1 ? 's' : ''}` : ''}</span></div>
-  </div><div class="two"><div class="panel">`;
+  </div><div class="panel">`;
 
   const byObj = groupBy(rows, r => r.objectif);
   for (const [obj, oRows] of byObj){
@@ -578,19 +600,10 @@ function renderPilotage(rows){
       });
     }
   }
-  html += `</div><div class="panel"><h2>Par groupement pilote</h2>${groupTable(rows)}</div></div>`;
+  html += `</div>`;
   el.innerHTML = html;
 }
 function groupBy(rows, fn){ const m = new Map(); rows.forEach(r => { const k = fn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }); return m; }
-function groupTable(rows){
-  const g = groupBy(rows, r => r.groupement || 'Non renseigné');
-  const keys = [...g.keys()].sort((a, b) => g.get(b).length - g.get(a).length || a.localeCompare(b, 'fr'));
-  return `<table class="grp"><thead><tr><th>Groupement</th><th>Rés.</th><th>Réalisation</th><th>Réalisés</th><th>En cours</th><th>À engager</th><th>Aband.</th><th>Proj./act.</th></tr></thead><tbody>
-    ${keys.map(k => { const rs = g.get(k), a = aggregate(rs), l = new Set(); rs.forEach(r => r.links.forEach(x => l.add(x.label)));
-      return `<tr><td>${esc(k)}</td><td>${a.n}</td><td><b>${pctTxt(a.taux)}</b></td><td>${a.byS['Réalisé']}</td><td>${a.byS['En cours']}</td><td>${a.byS['À engager']}</td><td>${a.byS['Abandonné']}</td><td>${l.size}</td></tr>`; }).join('')}
-  </tbody></table>`;
-}
-
 function renderMatrice(rows){
   const el = $('#v-matrice');
   const card = r => `<button class="card" data-edit="${r.id}" style="--c:${ST_COLOR[r.statut]}">
@@ -749,7 +762,7 @@ $('#strat').addEventListener('change', async e => {
   try { await grist.setOption('strategie', S.strat.id); } catch(err){}
   load();
 });
-$('#refresh').addEventListener('click', () => { if (confirmLeave()){ S.dirty = false; S.refLabels = {}; load(); } });
+$('#refresh').addEventListener('click', () => { if (confirmLeave()){ S.dirty = false; S.refLabels = {}; S.meta = null; S.refCache = {}; load(); } });
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setView(t.dataset.view)));
 document.querySelectorAll('.chip').forEach(ch => ch.addEventListener('click', () => {
   const p = ch.dataset.prio; S.prios.has(p) ? S.prios.delete(p) : S.prios.add(p);
@@ -760,7 +773,6 @@ $('#fObj').addEventListener('change', e => { S.obj = e.target.value; render(); }
 $('#fFac').addEventListener('change', e => { S.fac = e.target.value; render(); });
 $('#fSt').addEventListener('change', e => { S.st = e.target.value; render(); });
 $('#fTxt').addEventListener('input', e => { S.txt = e.target.value; render(); });
-$('#fPond').addEventListener('change', e => { S.pond = e.target.checked; render(); });
 $('#reset').addEventListener('click', () => {
   S.prios.clear(); S.grp = S.obj = S.fac = S.st = S.txt = '';
   document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', 'false'));
