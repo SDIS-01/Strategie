@@ -36,11 +36,6 @@ header{background:var(--card);border-bottom:1px solid var(--line);padding:8px 12
 .check{display:flex;align-items:center;gap:4px;color:var(--muted)}
 .reset{border:0;background:none;color:var(--accent);cursor:pointer;text-decoration:underline}
 .count{margin-left:auto;color:var(--muted)}
-.exp{position:relative}
-.exp-menu{display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:20;background:#fff;border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 6px 18px rgba(43,47,54,.12);padding:4px;min-width:210px}
-.exp-menu.open{display:block}
-.exp-menu button{display:block;width:100%;text-align:left;border:0;background:none;padding:7px 10px;border-radius:6px;cursor:pointer}
-.exp-menu button:hover{background:var(--accent-soft);color:var(--accent)}
 
 main{flex:1;overflow:auto;padding:12px}
 .view{display:none}.view.active{display:block}
@@ -164,14 +159,7 @@ textarea{min-height:70px;resize:vertical}
       <button class="tab" role="tab" data-view="saisie" aria-selected="false">Saisie</button>
     </nav>
     <button class="refresh" id="refresh" title="Relire les données">Actualiser</button>
-    <div class="exp">
-      <button class="refresh" id="expBtn" aria-haspopup="true" aria-expanded="false" title="Exporter la stratégie affichée, filtres compris">Exporter ▾</button>
-      <div class="exp-menu" id="expMenu" role="menu">
-        <button role="menuitem" data-exp="pdf">Rapport PDF</button>
-        <button role="menuitem" data-exp="odp">Diaporama Impress (.odp)</button>
-        <button role="menuitem" data-exp="xlsx">Tableur (.xlsx)</button>
-      </div>
-    </div>
+    <button class="refresh" id="expBtn" title="Exporter la stratégie affichée, filtres compris">Exporter en PDF</button>
   </div>
   <div class="filters">
     <button class="chip P1" data-prio="P1" aria-pressed="false">P1</button>
@@ -702,8 +690,6 @@ const EXP = {
   stText: {'À engager': '#7a2e24', 'En cours': '#4a3508', 'Réalisé': '#ffffff', 'Abandonné': '#ffffff'}
 };
 const EXP_STATUTS = ['À engager', 'En cours', 'Réalisé', 'Abandonné'];
-const EXP_MATRICE = {'P1|Oui': 'Gains rapides', 'P1|Non': 'Chantiers stratégiques', 'P2|Oui': 'À engager rapidement',
-                     'P2|Non': 'À planifier', 'P3|Oui': 'Opportunités', 'P3|Non': 'À différer'};
 const expNil = v => v === null || v === undefined || v === '' || (typeof v === 'number' && isNaN(v));
 const expNum = v => expNil(v) ? '—' : (typeof v === 'number' ? v.toLocaleString('fr-FR') : String(v));
 const expPct = v => v === null || v === undefined ? '—' : Math.round(v) + ' %';
@@ -739,6 +725,10 @@ function buildPdf(ctx, jsPDF){
   let lx = bx; doc.setFontSize(9); color('setTextColor', EXP.ink);
   EXP_STATUTS.forEach(s => { color('setFillColor', EXP.st[s]); doc.rect(lx, 57.5, 3, 3, 'F'); const t = T(`${s} : ${a.byS[s]}`); doc.text(t, lx + 4.5, 60.2); lx += doc.getTextWidth(t) + 12; });
   doc.setFontSize(10); doc.text(T(`${a.n} résultats attendus, dont ${a.byS['Réalisé']} réalisés`), bx, 68);
+  doc.setFontSize(8); color('setTextColor', EXP.muted);
+  doc.text('Cliquez sur une orientation pour accéder à son détail.', M, 75.5);
+  const pageNo = () => doc.internal.getCurrentPageInfo().pageNumber;
+  const synRows = [], targets = [], headerOf = {};
 
   doc.autoTable({
     startY: 78, margin: {left: M, right: M},
@@ -747,7 +737,12 @@ function buildPdf(ctx, jsPDF){
     styles: {font: 'helvetica', fontSize: 9, cellPadding: 2.2, textColor: expRgb(EXP.ink), lineColor: expRgb(EXP.line), lineWidth: 0.1},
     headStyles: {fillColor: expRgb(EXP.accentSoft), textColor: expRgb(EXP.accent), fontStyle: 'bold'},
     columnStyles: {0: {cellWidth: 118}, 1: {halign: 'center'}, 2: {halign: 'center'}, 3: {halign: 'center'}, 4: {halign: 'center'}, 5: {halign: 'center'}, 6: {cellWidth: 55, fontStyle: 'bold'}},
+    didParseCell: d => { if (d.section === 'body' && d.column.index === 0) d.cell.styles.textColor = expRgb(EXP.accent); },
     didDrawCell: d => {
+      if (d.section === 'body'){
+        const r = synRows[d.row.index] = synRows[d.row.index] || {page: pageNo(), x: d.cell.x, y: d.cell.y, h: d.cell.height, r: 0};
+        r.r = Math.max(r.r, d.cell.x + d.cell.width);
+      }
       if (d.section !== 'body' || d.column.index !== 6) return;
       const t = ctx.byObj[d.row.index].agg.taux || 0, x0 = d.cell.x + 17, w0 = d.cell.width - 20, y0 = d.cell.y + d.cell.height / 2 - 1.2;
       color('setFillColor', EXP.track); doc.roundedRect(x0, y0, w0, 2.4, 1.2, 1.2, 'F');
@@ -760,7 +755,8 @@ function buildPdf(ctx, jsPDF){
   doc.setFont('helvetica', 'bold'); doc.setFontSize(14); color('setTextColor', EXP.accent);
   doc.text('Détail des résultats attendus', M, 16);
   const body = [];
-  ctx.byObj.forEach(o => {
+  ctx.byObj.forEach((o, oi) => {
+    headerOf[body.length] = oi;
     body.push([{content: T(`${o.name}  (${o.agg.n} résultats, ${expPct(o.agg.taux)})`), colSpan: 8,
       styles: {fillColor: expRgb(EXP.accentSoft), textColor: expRgb(EXP.accent), fontStyle: 'bold'}}]);
     o.rows.forEach(r => body.push([T(r.resultat), r.priorite || '-', T(r.groupement || '-'), r.statut, T(expPct(r.pct)), T(expT0(r)),
@@ -774,6 +770,15 @@ function buildPdf(ctx, jsPDF){
     headStyles: {fillColor: expRgb(EXP.accent), textColor: [255, 255, 255], fontStyle: 'bold'},
     columnStyles: {0: {cellWidth: 72}, 1: {cellWidth: 11, halign: 'center', fontStyle: 'bold'}, 2: {cellWidth: 22}, 3: {cellWidth: 19, halign: 'center'},
                    4: {cellWidth: 12, halign: 'right', fontStyle: 'bold'}, 5: {cellWidth: 22}, 6: {cellWidth: 50}, 7: {cellWidth: 'auto'}},
+    didDrawCell: d => {
+      if (d.section !== 'body' || !(d.row.index in headerOf) || d.column.index !== 0) return;
+      if (!targets[headerOf[d.row.index]]) targets[headerOf[d.row.index]] = {page: pageNo(), y: d.cell.y};
+      const rx = d.cell.x + d.cell.width - 2, ry = d.cell.y + d.cell.height / 2 + 1;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); color('setTextColor', EXP.accent);
+      doc.text('Retour à la synthèse', rx, ry, {align: 'right'});
+      const tw = doc.getTextWidth('Retour à la synthèse');
+      doc.link(rx - tw, d.cell.y, tw, d.cell.height, {pageNumber: 1, top: 0});
+    },
     didParseCell: d => {
       if (d.section !== 'body' || d.row.raw.length === 1) return;
       if (d.column.index === 3 && EXP.st[d.cell.raw]){ d.cell.styles.fillColor = expRgb(EXP.st[d.cell.raw]); d.cell.styles.textColor = expRgb(EXP.stText[d.cell.raw]); }
@@ -781,6 +786,9 @@ function buildPdf(ctx, jsPDF){
     }
   });
 
+  // liens de la synthèse vers le détail de chaque orientation
+  synRows.forEach((r, i) => { const t = targets[i]; if (!r || !t) return;
+    doc.setPage(r.page); doc.link(r.x, r.y, r.r - r.x, r.h, {pageNumber: t.page, top: Math.max(t.y - 6, 0)}); });
   const n = doc.getNumberOfPages();
   for (let i = 1; i <= n; i++){
     doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); color('setTextColor', EXP.muted);
@@ -790,155 +798,13 @@ function buildPdf(ctx, jsPDF){
   return doc;
 }
 
-/* ----- Tableur (SheetJS) ----- */
-function buildXlsx(ctx, XLSX){
-  const a = ctx.agg, wb = XLSX.utils.book_new();
-  const syn = [
-    ['Stratégie', ctx.strat.label], ['Situation au', expDate(ctx.date)], ['Filtres', ctx.filtres], [],
-    ['Taux de réalisation (hors abandonnés)', a.taux === null ? null : a.taux / 100],
-    ['Résultats attendus', a.n], ...EXP_STATUTS.map(s => [s, a.byS[s]]), [],
-    ['Orientation', 'Résultats', 'Réalisés', 'En cours', 'À engager', 'Abandonnés', 'Avancement moyen'],
-    ...ctx.byObj.map(o => [o.name, o.agg.n, o.agg.byS['Réalisé'], o.agg.byS['En cours'], o.agg.byS['À engager'], o.agg.byS['Abandonné'], o.agg.taux === null ? null : o.agg.taux / 100])
-  ];
-  const ws1 = XLSX.utils.aoa_to_sheet(syn);
-  const pctCell = ref => { if (ws1[ref] && typeof ws1[ref].v === 'number') ws1[ref].z = '0%'; };
-  pctCell('B5');
-  ctx.byObj.forEach((o, i) => pctCell('G' + (13 + i)));
-  ws1['!cols'] = [{wch: 60}, {wch: 14}, {wch: 10}, {wch: 10}, {wch: 10}, {wch: 12}, {wch: 17}];
-  XLSX.utils.book_append_sheet(wb, ws1, 'Synthèse');
-
-  const head = ['Orientation', 'Sous-objectif', 'Résultat attendu', 'Priorité', 'Facile à atteindre', 'Groupement', 'Statut', 'Avancement',
-                'Valeur T0', 'Cible', 'Nb projets/actions', 'Projets/actions liés', 'Dernier commentaire', 'Auteur', 'Date du commentaire', 'Dernière mise à jour'];
-  const data = ctx.rows.map(r => { const c = expCom(r); return [r.objectif, r.sousObjectif, r.resultat, r.priorite, r.facile, r.groupement, r.statut, r.pct / 100,
-    expNil(r.t0) ? null : r.t0, expNil(r.cible) ? null : r.cible, r.links.length, r.links.map(l => l.label).join(' ; '),
-    c ? c.texte : '', c ? c.nom : '', c && c.date ? c.date : null, r.dateMaj || null]; });
-  const ws2 = XLSX.utils.aoa_to_sheet([head, ...data], {cellDates: true});
-  for (let i = 0; i < data.length; i++){
-    const rr = i + 2;
-    if (ws2['H' + rr]) ws2['H' + rr].z = '0%';
-    ['O', 'P'].forEach(c => { if (ws2[c + rr] && ws2[c + rr].t === 'd') ws2[c + rr].z = 'dd/mm/yyyy'; });
-  }
-  ws2['!cols'] = [30, 30, 60, 9, 10, 16, 12, 11, 10, 10, 10, 45, 60, 20, 14, 14].map(w => ({wch: w}));
-  ws2['!autofilter'] = {ref: `A1:P${data.length + 1}`};
-  XLSX.utils.book_append_sheet(wb, ws2, 'Résultats');
-  return wb;
-}
-
-/* ----- Diaporama LibreOffice Impress (.odp, 28 × 21 cm, Tahoma) ----- */
-function buildOdp(ctx, JSZip){
-  const x = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-  const cm = v => (Math.round(v * 1000) / 1000) + 'cm';
-  const autos = [], gs = {}, ps = {}, ts = {};
-  const g = (fill, stroke) => { const k = (fill || '') + '|' + (stroke || '');
-    if (!gs[k]){ gs[k] = 'gr' + Object.keys(gs).length;
-      autos.push(`<style:style style:name="${gs[k]}" style:family="graphic"><style:graphic-properties draw:fill="${fill ? 'solid' : 'none'}"${fill ? ` draw:fill-color="${fill}"` : ''} draw:stroke="${stroke ? 'solid' : 'none'}"${stroke ? ` svg:stroke-color="${stroke}" svg:stroke-width="0.03cm"` : ''} draw:shadow="hidden"/></style:style>`); }
-    return gs[k]; };
-  const tf = va => { if (!ts[va]){ ts[va] = 'tf' + va;
-      autos.push(`<style:style style:name="${ts[va]}" style:family="graphic"><style:graphic-properties draw:fill="none" draw:stroke="none" draw:shadow="hidden" draw:textarea-vertical-align="${va}" draw:auto-grow-height="false" draw:auto-grow-width="false" fo:padding-top="0cm" fo:padding-bottom="0cm" fo:padding-left="0cm" fo:padding-right="0cm" fo:wrap-option="wrap"/></style:style>`); }
-    return ts[va]; };
-  const p = (size, color, bold, align, italic) => { const k = [size, color, bold, align, italic].join('|');
-    if (!ps[k]){ ps[k] = 'P' + Object.keys(ps).length;
-      autos.push(`<style:style style:name="${ps[k]}" style:family="paragraph"><style:paragraph-properties fo:text-align="${align || 'start'}" fo:margin-top="0cm" fo:margin-bottom="0cm"/><style:text-properties style:font-name="Tahoma" fo:font-family="Tahoma" fo:font-size="${size}pt" fo:color="${color}" fo:font-weight="${bold ? 'bold' : 'normal'}" fo:font-style="${italic ? 'italic' : 'normal'}"/></style:style>`); }
-    return ps[k]; };
-  const rect = (X, Y, W, H, fill, o = {}) => `<draw:rect draw:style-name="${g(fill, o.stroke)}" svg:x="${cm(X)}" svg:y="${cm(Y)}" svg:width="${cm(Math.max(W, 0.02))}" svg:height="${cm(H)}"${o.r ? ` draw:corner-radius="${cm(o.r)}"` : ''}/>`;
-  const txt = (X, Y, W, H, s, o = {}) => `<draw:frame draw:style-name="${tf(o.va || 'top')}" svg:x="${cm(X)}" svg:y="${cm(Y)}" svg:width="${cm(W)}" svg:height="${cm(H)}"><draw:text-box>${
-    String(s ?? '').split('\n').map(l => `<text:p text:style-name="${p(o.size || 12, o.color || EXP.ink, o.bold, o.align, o.italic)}">${x(l)}</text:p>`).join('')}</draw:text-box></draw:frame>`;
-  const bar = (X, Y, W, H, pct, fill) => rect(X, Y, W, H, EXP.track, {r: H / 2}) + (pct > 0 ? rect(X, Y, Math.max(W * pct / 100, H), H, fill, {r: H / 2}) : '');
-
-  const slides = [];
-  const foot = () => txt(1.2, 20.1, 18, 0.5, `${ctx.strat.label} · situation au ${expDate(ctx.date)}`, {size: 8, color: EXP.muted});
-  const page = (title, sub, body) => slides.push(rect(0, 0, 0.35, 21, EXP.accent) + txt(1.2, 0.9, 25.6, 1.3, title, {size: title.length > 45 ? 20 : 24, bold: true, color: EXP.accent, va: 'bottom'})
-    + (sub ? txt(1.2, 2.2, 25.6, 0.6, sub, {size: 11, color: EXP.muted}) : '') + body + foot());
-  const a = ctx.agg;
-
-  // 1. Page de garde
-  slides.push(rect(0, 0, 28, 21, EXP.paper) + rect(0, 0, 1, 21, EXP.accent)
-    + txt(2.5, 6, 23.5, 2, ctx.strat.label, {size: 36, bold: true, color: EXP.accent, va: 'bottom'})
-    + txt(2.5, 8.3, 23.5, 1.2, 'État de réalisation', {size: 24, color: EXP.ink})
-    + txt(2.5, 10, 23.5, 0.8, `Situation au ${expDate(ctx.date)}`, {size: 14, color: EXP.muted})
-    + txt(2.5, 11, 23.5, 1.5, ctx.filtres === 'Aucun filtre' ? '' : `Périmètre : ${ctx.filtres}`, {size: 11, color: EXP.muted}));
-
-  // 2. Synthèse
-  let b = txt(1.2, 3.3, 8.3, 2.6, expPct(a.taux), {size: 60, bold: true, color: EXP.accent, va: 'bottom'})
-        + txt(1.2, 6, 8.3, 0.7, 'de réalisation (hors abandonnés)', {size: 12, color: EXP.muted})
-        + bar(10, 4.4, 16.8, 0.7, a.taux || 0, EXP.accent);
-  let sx = 10;
-  EXP_STATUTS.forEach(s => { const w = a.n ? 16.8 * a.byS[s] / a.n : 0; if (w > 0){ b += rect(sx, 5.6, w, 0.45, EXP.st[s]); sx += w; } });
-  EXP_STATUTS.forEach((s, i) => { b += rect(10 + i * 4.2, 6.45, 0.35, 0.35, EXP.st[s]) + txt(10.5 + i * 4.2, 6.35, 3.6, 0.6, `${s} : ${a.byS[s]}`, {size: 10}); });
-  const kpis = [['Résultats attendus', a.n, EXP.accent], ...EXP_STATUTS.map(s => [s, a.byS[s], s === 'À engager' ? EXP.stText[s] : EXP.st[s]])];
-  const kw = (25.6 - 4 * 0.4) / 5;
-  kpis.forEach(([l, v, c], i) => { const X = 1.2 + i * (kw + 0.4);
-    b += rect(X, 9, kw, 3.2, '#ffffff', {stroke: EXP.line, r: 0.2}) + txt(X, 9.3, kw, 1.6, String(v), {size: 30, bold: true, color: c, align: 'center', va: 'bottom'})
-       + txt(X, 11, kw, 0.8, l, {size: 11, color: EXP.muted, align: 'center'}); });
-  page('Synthèse', null, b);
-
-  // 3. Avancement par orientation (11 par diapositive)
-  for (let i = 0; i < ctx.byObj.length; i += 11){
-    let body = '';
-    ctx.byObj.slice(i, i + 11).forEach((o, k) => { const Y = 3.3 + k * 1.5;
-      body += rect(1.2, Y + 1.38, 25.6, 0.02, EXP.line)
-        + txt(1.2, Y, 13.2, 1.3, expTrunc(o.name, 120), {size: 12, va: 'middle'})
-        + bar(14.8, Y + 0.45, 8.2, 0.42, o.agg.taux || 0, EXP.accent)
-        + txt(23.2, Y, 1.7, 1.3, expPct(o.agg.taux), {size: 12, bold: true, color: EXP.accent, va: 'middle', align: 'end'})
-        + txt(25, Y, 1.8, 1.3, `${o.agg.byS['Réalisé']}/${o.agg.n} réal.`, {size: 9, color: EXP.muted, va: 'middle', align: 'end'}); });
-    page('Avancement par orientation' + (i ? ' (suite)' : ''), null, body);
-  }
-
-  // 4. Une diapositive par orientation (10 résultats par diapositive)
-  ctx.byObj.forEach(o => {
-    for (let i = 0; i < o.rows.length; i += 10){
-      let body = '';
-      o.rows.slice(i, i + 10).forEach((r, k) => { const Y = 3.2 + k * 1.62, c = expComTxt(r);
-        const sub = [r.groupement, r.links.length ? `${r.links.length} projet${r.links.length > 1 ? 's' : ''}/action${r.links.length > 1 ? 's' : ''}` : '', c ? 'Dernier commentaire : ' + c : ''].filter(Boolean).join(' · ');
-        body += rect(1.2, Y, 0.14, 1.42, EXP.st[r.statut])
-          + txt(1.55, Y, 15.4, 0.8, expTrunc(r.resultat, 82), {size: 10, va: 'middle'})
-          + txt(1.55, Y + 0.8, 15.4, 0.62, expTrunc(sub, 135), {size: 8, color: EXP.muted, italic: !!c, va: 'top'})
-          + (r.priorite ? rect(17.3, Y + 0.4, 1.1, 0.6, EXP.prioSoft[r.priorite], {r: 0.1}) + txt(17.3, Y + 0.4, 1.1, 0.6, r.priorite, {size: 9, bold: true, color: EXP.prio[r.priorite], align: 'center', va: 'middle'}) : '')
-          + rect(18.6, Y + 0.4, 2.7, 0.6, EXP.st[r.statut], {r: 0.3}) + txt(18.6, Y + 0.4, 2.7, 0.6, r.statut, {size: 9, bold: true, color: EXP.stText[r.statut], align: 'center', va: 'middle'})
-          + bar(21.6, Y + 0.57, 3.4, 0.26, r.pct, EXP.st[r.statut] === EXP.st['À engager'] ? EXP.accent : EXP.st[r.statut])
-          + txt(25.1, Y + 0.3, 1.7, 0.8, expPct(r.pct), {size: 11, bold: true, align: 'end', va: 'middle'}); });
-      page(expTrunc(o.name, 62) + (i ? ' (suite)' : ''), i ? null : `${o.agg.n} résultat${o.agg.n > 1 ? 's' : ''} attendu${o.agg.n > 1 ? 's' : ''} · réalisation ${expPct(o.agg.taux)} · ${o.agg.byS['Réalisé']} réalisé${o.agg.byS['Réalisé'] > 1 ? 's' : ''}`, body);
-    }
-  });
-
-  // 5. Matrice priorité × facilité (résultats réalisés exclus)
-  let m = txt(2.8, 3.2, 11.8, 0.7, 'Facile à atteindre', {size: 13, bold: true, color: EXP.accent, align: 'center', va: 'middle'})
-        + txt(15, 3.2, 11.8, 0.7, 'Difficile à atteindre', {size: 13, bold: true, color: EXP.accent, align: 'center', va: 'middle'});
-  ['P1', 'P2', 'P3'].forEach((pr, i) => { const Y = 4.1 + i * 5.25;
-    m += rect(1.2, Y, 1.4, 5, EXP.prioSoft[pr]) + rect(1.2, Y, 0.12, 5, EXP.prio[pr]) + txt(1.2, Y, 1.4, 5, pr, {size: 20, bold: true, color: EXP.prio[pr], align: 'center', va: 'middle'});
-    ['Oui', 'Non'].forEach((f, j) => { const X = j ? 15 : 2.8;
-      const all = ctx.rows.filter(r => r.priorite === pr && r.facile === f), items = all.filter(r => r.statut !== 'Réalisé'), nr = all.length - items.length;
-      m += rect(X, Y, 11.8, 5, '#ffffff', {stroke: EXP.line, r: 0.15})
-        + txt(X + 0.35, Y + 0.25, 11.1, 0.7, EXP_MATRICE[pr + '|' + f], {size: 13, bold: true})
-        + txt(X + 0.35, Y + 0.9, 11.1, 0.55, `${items.length} à traiter${nr ? ` · ${nr} réalisé${nr > 1 ? 's' : ''}` : ''}`, {size: 9, color: EXP.muted});
-      const shown = items.slice(0, 4);
-      shown.forEach((r, k) => { m += rect(X + 0.35, Y + 1.6 + k * 0.62, 0.1, 0.45, EXP.st[r.statut])
-        + txt(X + 0.6, Y + 1.55 + k * 0.62, 9.6, 0.55, expTrunc(r.resultat, 50), {size: 9, va: 'middle'})
-        + txt(X + 10.2, Y + 1.55 + k * 0.62, 1.3, 0.55, expPct(r.pct), {size: 9, bold: true, align: 'end', va: 'middle'}); });
-      if (items.length > shown.length) m += txt(X + 0.6, Y + 4.2, 10.9, 0.45, `+ ${items.length - shown.length} autre${items.length - shown.length > 1 ? 's' : ''}`, {size: 8, color: EXP.muted, italic: true});
-    }); });
-  page('Matrice priorité × facilité', 'Résultats restant à traiter (réalisés exclus)', m);
-
-  const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"';
-  const fonts = '<office:font-face-decls><style:font-face style:name="Tahoma" svg:font-family="Tahoma"/></office:font-face-decls>';
-  const pages = slides.map((s, i) => `<draw:page draw:name="page${i + 1}" draw:style-name="dp1" draw:master-page-name="Standard">${s}</draw:page>`).join('');
-  const content = `<?xml version="1.0" encoding="UTF-8"?><office:document-content ${NS} office:version="1.2">${fonts}<office:automatic-styles><style:style style:name="dp1" style:family="drawing-page"><style:drawing-page-properties presentation:background-visible="true" presentation:background-objects-visible="true"/></style:style>${autos.join('')}</office:automatic-styles><office:body><office:presentation>${pages}</office:presentation></office:body></office:document-content>`;
-  const styles = `<?xml version="1.0" encoding="UTF-8"?><office:document-styles ${NS} office:version="1.2">${fonts}<office:styles><style:default-style style:family="graphic"><style:text-properties style:font-name="Tahoma" fo:font-size="12pt"/></style:default-style></office:styles><office:automatic-styles><style:page-layout style:name="PM1"><style:page-layout-properties fo:margin-top="0cm" fo:margin-bottom="0cm" fo:margin-left="0cm" fo:margin-right="0cm" fo:page-width="28cm" fo:page-height="21cm" style:print-orientation="landscape"/></style:page-layout><style:style style:name="Mdp1" style:family="drawing-page"><style:drawing-page-properties draw:fill="solid" draw:fill-color="#ffffff"/></style:style></office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="PM1" draw:style-name="Mdp1"/></office:master-styles></office:document-styles>`;
-  const manifest = `<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.presentation"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/></manifest:manifest>`;
-  const zip = new JSZip();
-  zip.file('mimetype', 'application/vnd.oasis.opendocument.presentation', {compression: 'STORE'});
-  zip.file('content.xml', content); zip.file('styles.xml', styles); zip.file('META-INF/manifest.xml', manifest);
-  return zip;
-}
 /* EXPORT-END */
 
 
 /* ---------- export : chargement des bibliothèques et déclenchement ---------- */
 const LIBS = {
   jspdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
-  autotable: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js',
-  xlsx: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
-  jszip: 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'
+  autotable: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'
 };
 const loaded = {};
 const loadScript = url => loaded[url] = loaded[url] || new Promise((ok, ko) => {
@@ -962,34 +828,20 @@ function download(blob, name){
   a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
-async function runExport(kind){
+async function runExport(){
   const btn = $('#expBtn'), label = btn.textContent;
   const ctx = exportCtx();
   if (!ctx.rows.length){ alert('Aucun résultat attendu à exporter avec les filtres actuels.'); return; }
   btn.disabled = true; btn.textContent = 'Export en cours…';
   try {
-    if (kind === 'pdf'){
-      await loadScript(LIBS.jspdf); await loadScript(LIBS.autotable);
-      const jsPDF = window.jspdf.jsPDF;
-      if (!jsPDF.API.autoTable && window.jspdf_autotable && window.jspdf_autotable.applyPlugin) window.jspdf_autotable.applyPlugin(jsPDF);
-      download(buildPdf(ctx, jsPDF).output('blob'), expFile(ctx, 'pdf'));
-    } else if (kind === 'xlsx'){
-      await loadScript(LIBS.xlsx);
-      const out = XLSX.write(buildXlsx(ctx, XLSX), {bookType: 'xlsx', type: 'array', cellDates: true});
-      download(new Blob([out], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), expFile(ctx, 'xlsx'));
-    } else if (kind === 'odp'){
-      await loadScript(LIBS.jszip);
-      const blob = await buildOdp(ctx, JSZip).generateAsync({type: 'blob', mimeType: 'application/vnd.oasis.opendocument.presentation', compression: 'DEFLATE'});
-      download(blob, expFile(ctx, 'odp'));
-    }
+    await loadScript(LIBS.jspdf); await loadScript(LIBS.autotable);
+    const jsPDF = window.jspdf.jsPDF;
+    if (!jsPDF.API.autoTable && window.jspdf_autotable && window.jspdf_autotable.applyPlugin) window.jspdf_autotable.applyPlugin(jsPDF);
+    download(buildPdf(ctx, jsPDF).output('blob'), expFile(ctx, 'pdf'));
   } catch(e){ alert("L'export a échoué : " + (e.message || e)); }
   finally { btn.disabled = false; btn.textContent = label; }
 }
-const expMenu = open => { $('#expMenu').classList.toggle('open', open); $('#expBtn').setAttribute('aria-expanded', open); };
-$('#expBtn').addEventListener('click', e => { e.stopPropagation(); expMenu(!$('#expMenu').classList.contains('open')); });
-$('#expMenu').addEventListener('click', e => { const b = e.target.closest('[data-exp]'); if (!b) return; expMenu(false); runExport(b.dataset.exp); });
-document.addEventListener('click', () => expMenu(false));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') expMenu(false); });
+$('#expBtn').addEventListener('click', runExport);
 
 /* ---------- navigation ---------- */
 const confirmLeave = () => !S.dirty || confirm('Des modifications ne sont pas enregistrées. Les abandonner ?');
