@@ -49,9 +49,6 @@ main{flex:1;overflow:auto;padding:12px}
 .big small{display:block;font-size:13px;font-weight:600;color:var(--muted);margin-top:4px}
 .gauge{position:relative;height:18px;background:#eef0f3;border-radius:3px}
 .gauge .fill{position:absolute;inset:0 auto 0 0;background:var(--accent);border-radius:3px}
-.gauge .time{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--ink)}
-.gauge-legend{display:flex;justify-content:space-between;color:var(--muted);margin-top:6px;flex-wrap:wrap;gap:6px}
-.gap-ok{color:var(--s-real);font-weight:700}.gap-ko{color:var(--ko);font-weight:700}
 .stack{display:flex;height:10px;border-radius:3px;overflow:hidden;margin-top:12px;background:#eef0f3}
 .stack i{display:block}
 .legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px;color:var(--muted)}
@@ -82,7 +79,6 @@ main{flex:1;overflow:auto;padding:12px}
 .badge.P1{background:var(--p1-soft);color:var(--p1)}.badge.P2{background:var(--p2-soft);color:var(--p2)}.badge.P3{background:var(--p3-soft);color:var(--p3)}
 .badge.nd{background:#eee;color:var(--muted)}
 .tag{border:1px solid var(--line);border-radius:3px;padding:0 6px}
-.tag.late{border-color:#e7b9b5;color:var(--ko);background:#fdf3f2}
 .st{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;background:var(--c)}
 .prog{display:flex;flex-direction:column;gap:3px}
 .prog .pb{height:7px;background:#eef0f3;border-radius:3px;overflow:hidden}
@@ -206,9 +202,7 @@ const CONFIG = {
     facile:       ['Facile_a_atteindre'],
     groupement:   ['Groupement_Porteur', 'Groupement_Pilote'],
     t0:           ['Valeur_T0'],
-    anneeT0:      ['Annee_T0'],
     cible:        ['Cible'],
-    echeance:     ['Echeance'],
     observation:  ['Observation'],
     liens:        ['ID_Projet_Action'],
     avancement:   ['Avancement', 'Taux_Avancement'],
@@ -221,8 +215,7 @@ const CONFIG = {
             nom: ['Auteur', 'Auteur_Nom'], date: ['Date_Commentaire'], email: ['Auteur_Email']},
   tableProjets: 'Liste_PEPS_AV',
   colLibelleProjet: ['ID_Projet_Action', 'ID_Projet_Action_AV', 'Libelle', 'Intitule', 'Nom'],
-  colTypeProjet: ['Nature', 'Type', 'Nature_Action', 'Type_Projet_Action'],
-  toleranceRetard: 15  // points de % sous le rythme attendu avant de signaler un retard
+  colTypeProjet: ['Nature', 'Type', 'Nature_Action', 'Type_Projet_Action']
 };
 
 const STATUTS = ['À engager', 'En cours', 'Réalisé', 'Abandonné'];
@@ -260,8 +253,6 @@ function readPct(v){ // accepte 0–1 (format % Grist) ou 0–100
   if (isEmpty(v) || isNaN(Number(v))) return 0;
   const n = Number(v); return clamp(n <= 1 ? n * 100 : n, 0, 100);
 }
-const yStart = y => new Date(y, 0, 1).getTime();
-const yEnd = y => new Date(y, 11, 31, 23, 59).getTime();
 function dateFromGrist(v){ if (isEmpty(v)) return null; const d = new Date(Number(v) * 1000); return isNaN(d) ? null : d; }
 const dFr = d => d ? d.toLocaleDateString('fr-FR') : '—';
 
@@ -388,7 +379,6 @@ async function load(){
     }
     const get = (k, i) => { if (!S.colIds[k]) return null; const v = raw[S.colIds[k]][i]; return resolvers[k] ? resolvers[k](v) : v; };
     const refTables = new Set();
-    const now = Date.now(), curYear = new Date().getFullYear();
     const rows = raw.id.map((id, i) => {
       const refs = []; collectRefs(get('liens', i), refs);
       refs.forEach(r => { if (r.id) refTables.add(r.t || CONFIG.tableProjets); });
@@ -396,23 +386,14 @@ async function load(){
       const pct = readPct(get('avancement', i));
       const stRaw = String(get('statut', i) ?? '');
       const statut = norm(stRaw) === 'abandonne' ? 'Abandonné' : statutAuto(pct);
-      const anneeT0 = get('anneeT0', i), echeance = get('echeance', i);
-      // rythme attendu : linéaire entre l'année T0 (ou début de stratégie) et l'échéance (ou fin de stratégie)
-      const y0 = !isEmpty(anneeT0) ? Number(anneeT0) : S.strat.start;
-      const y1 = !isEmpty(echeance) ? Number(echeance) : S.strat.end;
-      const attendu = y1 >= y0 ? clamp((now - yStart(y0)) / (yEnd(y1) - yStart(y0)), 0, 1) * 100 : null;
-      const actif = statut === 'À engager' || statut === 'En cours';
       return {
         id, refs, resultat, code: codeOf(resultat),
         objectif: String(get('objectif', i) ?? '') || 'Sans orientation',
         sousObjectif: String(get('sousObjectif', i) ?? '') || 'Sans sous-objectif',
         priorite: normPrio(get('priorite', i)), facile: normFac(get('facile', i)),
         groupement: String(get('groupement', i) ?? '').trim(),
-        t0: get('t0', i), anneeT0, cible: get('cible', i), echeance, observation: get('observation', i),
+        t0: get('t0', i), cible: get('cible', i), observation: get('observation', i),
         pct, statut, statutStocke: stRaw, dateMaj: dateFromGrist(get('dateMaj', i)),
-        attendu,
-        depassee: actif && !isEmpty(echeance) && Number(echeance) < curYear,
-        retard: actif && attendu !== null && pct + CONFIG.toleranceRetard < attendu
       };
     });
     await loadRefTables([...refTables]);
@@ -536,8 +517,8 @@ function render(){
 const prioBadge = p => p ? `<span class="badge ${p}">${p}</span>` : `<span class="badge nd">Sans priorité</span>`;
 const stBadge = s => `<span class="st" style="--c:${ST_COLOR[s]}">${esc(s)}</span>`;
 function indicText(r){
-  if ([r.t0, r.anneeT0, r.cible, r.echeance].every(isEmpty)) return '';
-  return `T0 ${fmt(r.t0)}${isEmpty(r.anneeT0) ? '' : ' (' + r.anneeT0 + ')'} → cible ${fmt(r.cible)}${isEmpty(r.echeance) ? '' : ' en ' + r.echeance}`;
+  if ([r.t0, r.cible].every(isEmpty)) return '';
+  return `T0 ${fmt(r.t0)} → cible ${fmt(r.cible)}`;
 }
 function linksLabel(r){
   const n = r.links.length; if (!n) return 'Aucun projet ni action';
@@ -547,18 +528,11 @@ function linksLabel(r){
   const o = n - r.nbProjets - r.nbActions; if (o) p.push(`${o} autre${o > 1 ? 's' : ''}`);
   return p.join(', ');
 }
-function alertTags(r){
-  return (r.depassee ? `<span class="tag late">Échéance ${r.echeance} dépassée</span>` : '')
-       + (!r.depassee && r.retard ? `<span class="tag late" title="Rythme attendu à date : ${Math.round(r.attendu)} %">En retard</span>` : '');
-}
 
 function renderPilotage(rows){
   const el = $('#v-pilotage');
   if (!rows.length){ el.innerHTML = `<div class="empty">Aucun résultat attendu ne correspond aux filtres. Modifiez ou réinitialisez les filtres.</div>`; return; }
   const a = aggregate(rows);
-  const s = S.strat;
-  const temps = clamp((Date.now() - yStart(s.start)) / (yEnd(s.end) - yStart(s.start)), 0, 1) * 100;
-  const ecart = a.taux === null ? null : a.taux - temps;
   const sansLien = rows.filter(r => !r.links.length).length;
   const lastMaj = rows.reduce((m, r) => r.dateMaj && (!m || r.dateMaj > m) ? r.dateMaj : m, null);
   const jamais = S.colIds.dateMaj ? rows.filter(r => !r.dateMaj).length : null;
@@ -566,11 +540,8 @@ function renderPilotage(rows){
   let html = `<div class="hero">
     <div class="big">${pctTxt(a.taux)}<small>de réalisation</small></div>
     <div>
-      <div class="gauge" role="img" aria-label="Réalisation ${pctTxt(a.taux)}, temps écoulé ${Math.round(temps)} %">
-        <div class="fill" style="width:${a.taux ?? 0}%"></div><div class="time" style="left:${temps}%"></div></div>
-      <div class="gauge-legend"><span>${s.start}</span>
-        <span>Temps écoulé : ${Math.round(temps)} % de la période ${s.start}-${s.end}${ecart === null ? '' :
-          `, écart : <span class="${ecart >= 0 ? 'gap-ok' : 'gap-ko'}">${ecart >= 0 ? '+' : ''}${Math.round(ecart)} pts</span>`}</span><span>${s.end}</span></div>
+      <div class="gauge" role="img" aria-label="Réalisation ${pctTxt(a.taux)}">
+        <div class="fill" style="width:${a.taux ?? 0}%"></div></div>
       <div class="stack">${STATUTS.map(st => a.byS[st] ? `<i style="width:${a.byS[st] / a.n * 100}%;background:${ST_COLOR[st]}" title="${st} : ${a.byS[st]}"></i>` : '').join('')}</div>
       <div class="legend">${STATUTS.map(st => `<span style="--c:${ST_COLOR[st]}">${st} : ${a.byS[st]}</span>`).join('')}</div>
     </div></div>
@@ -590,7 +561,7 @@ function renderPilotage(rows){
         html += `<div class="row">
           <div><div class="title" data-edit="${r.id}" title="Ouvrir la saisie">${esc(r.resultat)}</div>
             <div class="meta">${prioBadge(r.priorite)}${r.facile ? `<span class="tag">Facile : ${r.facile.toLowerCase()}</span>` : ''}
-              ${r.groupement ? `<span class="tag">${esc(r.groupement)}</span>` : ''}${alertTags(r)}
+              ${r.groupement ? `<span class="tag">${esc(r.groupement)}</span>` : ''}
               ${r.comments.length ? `<span class="tag" title="${esc(r.comments[0].texte.slice(0, 200))}">${r.comments.length} commentaire${r.comments.length > 1 ? 's' : ''}, dernier le ${dFr(r.comments[0].date)}</span>` : ''}
               ${indicText(r) ? `<span>${esc(indicText(r))}</span>` : ''}</div></div>
           <div class="prog" style="--c:${ST_COLOR[r.statut]}">${stBadge(r.statut)}<span class="pb"><i style="width:${r.pct}%"></i></span><b>${pctTxt(r.pct)}</b></div>
@@ -647,16 +618,13 @@ function renderSaisie(rows){
         </div>
         <div class="avc-foot">
           <label class="check"><input type="checkbox" id="iAb" ${r.statut === 'Abandonné' ? 'checked' : ''}> Abandonné</label>
-          <span class="status">${r.attendu !== null && r.statut !== 'Abandonné' ? `Rythme attendu à date : ${Math.round(r.attendu)} %` : ''}</span>
           <span class="status">Dernière mise à jour : ${dFr(r.dateMaj)}</span>
         </div>
       </fieldset>
       <fieldset><legend>Indicateur</legend>
         <div class="grid">
           <label class="f">Valeur T0<input id="iT0" inputmode="decimal" value="${v(r.t0)}"></label>
-          <label class="f">Année T0<input id="iAn" inputmode="numeric" maxlength="4" value="${v(r.anneeT0)}"></label>
           <label class="f">Cible<input id="iCi" inputmode="decimal" value="${v(r.cible)}"></label>
-          <label class="f">Échéance (année)<input id="iEc" inputmode="numeric" maxlength="4" value="${v(r.echeance)}"></label>
         </div>
       </fieldset>
       <fieldset><legend>Commentaires</legend>
@@ -679,7 +647,7 @@ function renderSaisie(rows){
   $('#iPr').addEventListener('input', e => { $('#iPn').value = e.target.value; touch(); });
   $('#iPn').addEventListener('input', e => { const n = Number(e.target.value); if (!isNaN(n)) $('#iPr').value = clamp(n, 0, 100); touch(); });
   $('#iAb').addEventListener('change', touch);
-  ['iT0','iAn','iCi','iEc'].forEach(id => $('#' + id).addEventListener('input', touch));
+  ['iT0','iCi'].forEach(id => $('#' + id).addEventListener('input', touch));
   if ($('#iCm')){
     const okCm = () => { $('#addCm').disabled = !$('#iCm').value.trim() || !$('#iAu').value.trim(); $('#cmStatus').textContent = ''; };
     ['iCm','iAu'].forEach(id => $('#' + id).addEventListener('input', e => { e.target.classList.remove('invalid'); okCm(); }));
@@ -692,24 +660,17 @@ function renderSaisie(rows){
 
 /* ---------- contrôle et enregistrement ---------- */
 function parseNum(s){ s = s.trim().replace(/\s/g, '').replace(',', '.'); if (!s) return null; const n = Number(s); return isNaN(n) ? NaN : n; }
-function parseYear(s){ s = s.trim(); if (!s) return null; return /^\d{4}$/.test(s) && +s >= 1990 && +s <= 2100 ? +s : NaN; }
 function validate(){
   const pRaw = $('#iPn').value.trim();
   const f = {pct: pRaw === '' ? 0 : Number(pRaw), ab: $('#iAb').checked,
-             t0: parseNum($('#iT0').value), an: parseYear($('#iAn').value), ci: parseNum($('#iCi').value), ec: parseYear($('#iEc').value)};
+             t0: parseNum($('#iT0').value), ci: parseNum($('#iCi').value)};
   const err = [], wrn = [];
   const mark = (id, bad) => $('#' + id).classList.toggle('invalid', bad);
   const pBad = !Number.isInteger(f.pct) || f.pct < 0 || f.pct > 100;
   mark('iPn', pBad); if (pBad) err.push('Avancement : saisissez un nombre entier entre 0 et 100.');
   mark('iT0', Number.isNaN(f.t0)); if (Number.isNaN(f.t0)) err.push('Valeur T0 : saisissez un nombre.');
   mark('iCi', Number.isNaN(f.ci)); if (Number.isNaN(f.ci)) err.push('Cible : saisissez un nombre.');
-  mark('iAn', Number.isNaN(f.an)); if (Number.isNaN(f.an)) err.push('Année T0 : saisissez une année sur 4 chiffres.');
-  mark('iEc', Number.isNaN(f.ec)); if (Number.isNaN(f.ec)) err.push('Échéance : saisissez une année sur 4 chiffres.');
-  if (typeof f.an === 'number' && typeof f.ec === 'number' && !isNaN(f.an) && !isNaN(f.ec) && f.ec <= f.an){
-    err.push("L'échéance doit être postérieure à l'année T0."); mark('iEc', true);
-  }
   if (f.t0 !== null && f.ci === null) wrn.push('Valeur T0 saisie sans cible.');
-  if (f.ci !== null && f.ec === null) wrn.push('Cible saisie sans échéance.');
   f.statut = f.ab ? 'Abandonné' : statutAuto(pBad ? 0 : f.pct);
   $('#stPrev').innerHTML = stBadge(f.statut);
   $('#msgs').innerHTML = err.map(m => `<li class="err">${esc(m)}</li>`).join('') + wrn.map(m => `<li class="wrn">${esc(m)}</li>`).join('');
@@ -722,9 +683,7 @@ async function save(){
   const r = S.rows.find(x => x.id === S.selectedId);
   const c = S.colIds, fields = {};
   if (c.t0) fields[c.t0] = f.t0;
-  if (c.anneeT0) fields[c.anneeT0] = f.an;
   if (c.cible) fields[c.cible] = f.ci;
-  if (c.echeance) fields[c.echeance] = f.ec;
   if (c.avancement && c.statut){
     fields[c.avancement] = f.pct / 100;
     fields[c.statut] = f.statut;
