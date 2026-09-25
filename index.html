@@ -71,7 +71,7 @@ main{flex:1;overflow:auto;padding:12px}
 .mini{display:flex;align-items:center;gap:6px;font-weight:700}
 .mini .pb{flex:1;height:6px;background:#fff;border-radius:3px;overflow:hidden}
 .mini .pb i{display:block;height:100%;background:currentColor}
-.row{display:grid;grid-template-columns:minmax(0,1fr) 150px auto;gap:10px;padding:8px 12px;border-top:1px solid var(--line);align-items:start}
+.row{display:grid;grid-template-columns:minmax(0,1fr) 190px 150px;gap:10px;padding:8px 12px;border-top:1px solid var(--line);align-items:start}
 .row:hover{background:#fbfaf7}
 .title{cursor:pointer}
 .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;color:var(--muted);align-items:center}
@@ -84,7 +84,7 @@ main{flex:1;overflow:auto;padding:12px}
 .prog .pb{height:6px;background:var(--track);border-radius:3px;overflow:hidden}
 .prog .pb i{display:block;height:100%;background:var(--c)}
 .prog b{font-size:12px}
-.links-btn{border:1px solid var(--line);background:#fff;border-radius:12px;padding:2px 9px;cursor:pointer;white-space:nowrap}
+.links-btn{justify-self:end;border:1px solid var(--line);background:#fff;border-radius:12px;padding:2px 9px;cursor:pointer;white-space:nowrap}
 .links{grid-column:1 / 4;margin:4px 0 0;padding:6px 10px;background:var(--paper);border-left:3px solid var(--accent);border-radius:0;list-style:none}
 .links li{padding:2px 0}
 table.grp{width:100%;border-collapse:collapse}
@@ -545,8 +545,8 @@ function renderPilotage(rows){
               ${r.groupement ? `<span class="tag">${esc(r.groupement)}</span>` : ''}
               ${r.comments.length ? `<span class="tag" title="${esc(r.comments[0].texte.slice(0, 200))}">${r.comments.length} commentaire${r.comments.length > 1 ? 's' : ''}, dernier le ${dFr(r.comments[0].date)}</span>` : ''}
               ${indicText(r) ? `<span>${esc(indicText(r))}</span>` : ''}</div></div>
-          <div class="prog" style="--c:${ST_COLOR[r.statut]}">${stBadge(r.statut)}<span class="pb"><i style="width:${r.pct}%"></i></span><b>${pctTxt(r.pct)}</b></div>
           ${r.links.length ? `<button class="links-btn" data-links="${r.id}" aria-expanded="${open}">${esc(linksLabel(r))}</button>` : '<span></span>'}
+          <div class="prog" style="--c:${ST_COLOR[r.statut]}">${stBadge(r.statut)}<span class="pb"><i style="width:${r.pct}%"></i></span><b>${pctTxt(r.pct)}</b></div>
           ${open ? `<ul class="links">${r.links.map(l => `<li>${esc(l.label)}</li>`).join('')}</ul>` : ''}
         </div>`;
       });
