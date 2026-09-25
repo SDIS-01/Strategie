@@ -85,10 +85,8 @@ main{flex:1;overflow:auto;padding:12px}
 .prog .pb i{display:block;height:100%;background:var(--c)}
 .prog b{font-size:12px}
 .links-btn{border:1px solid var(--line);background:#fff;border-radius:12px;padding:2px 9px;cursor:pointer;white-space:nowrap}
-.links-btn.zero{color:var(--ko);border-color:#e7b9b5;background:#fdf3f2}
 .links{grid-column:1 / 4;margin:4px 0 0;padding:6px 10px;background:var(--paper);border-left:3px solid var(--accent);list-style:none}
 .links li{padding:2px 0}
-.links .kind{color:var(--muted);font-size:11px;margin-left:6px}
 table.grp{width:100%;border-collapse:collapse}
 table.grp th,table.grp td{padding:6px 8px;border-top:1px solid var(--line);text-align:right}
 table.grp th:first-child,table.grp td:first-child{text-align:left}
@@ -214,8 +212,7 @@ const CONFIG = {
   colsObs: {strategie: ['Strategie'], idResultat: ['ID_Resultat'], resultat: ['Resultat_Attendu'], texte: ['Commentaire'],
             nom: ['Auteur', 'Auteur_Nom'], date: ['Date_Commentaire'], email: ['Auteur_Email']},
   tableProjets: 'Liste_PEPS_AV',
-  colLibelleProjet: ['ID_Projet_Action', 'ID_Projet_Action_AV', 'Libelle', 'Intitule', 'Nom'],
-  colTypeProjet: ['Nature', 'Type', 'Nature_Action', 'Type_Projet_Action']
+  colLibelleProjet: ['ID_Projet_Action', 'ID_Projet_Action_AV', 'Libelle', 'Intitule', 'Nom']
 };
 
 const STATUTS = ['À engager', 'En cours', 'Réalisé', 'Abandonné'];
@@ -292,17 +289,6 @@ function collectRefs(v, out){
     s.split(/\n|;/).map(x => x.trim()).filter(Boolean).forEach(x => out.push({label: x}));
   }
 }
-function kindOf(label, typeVal){
-  if (!isEmpty(typeVal)){
-    const t = norm(typeVal);
-    if (t.includes('projet') || t === 'p') return 'Projet';
-    if (t.includes('action') || ['a','av','meo'].includes(t)) return 'Action';
-    return String(typeVal);
-  }
-  const m = String(label).match(/^\S*?_([A-Za-z]+)(\s|$)/);
-  if (m){ const c = m[1].toUpperCase(); if (c === 'P') return 'Projet'; if (['A','AV','MEO'].includes(c)) return 'Action'; }
-  return 'Non typé';
-}
 /* ---------- colonnes de type Référence : affichage du libellé au lieu de l'identifiant ---------- */
 async function loadMeta(){
   if (S.meta) return S.meta;
@@ -336,11 +322,10 @@ async function loadRefTables(tables){
       const keys = Object.keys(raw).filter(k => k !== 'id' && k !== 'manualSort' && !k.startsWith('gristHelper'));
       let lab = resolveCol(keys, CONFIG.colLibelleProjet);
       if (!lab) lab = keys.find(k => raw[k].some(x => typeof x === 'string' && x.trim())) || null;
-      const typ = resolveCol(keys, CONFIG.colTypeProjet);
       const m = {};
       raw.id.forEach((id, i) => {
         const label = lab ? String(raw[lab][i] ?? '') : '#' + id;
-        m[id] = {label: label || '#' + id, kind: kindOf(label, typ ? raw[typ][i] : null)};
+        m[id] = {label: label || '#' + id};
       });
       S.refLabels[t] = m;
     } catch(e){ S.refLabels[t] = {}; }
@@ -402,12 +387,10 @@ async function load(){
     rows.forEach(r => {
       const seen = new Set(); r.links = [];
       r.refs.forEach(ref => {
-        const item = ref.label ? {label: ref.label, kind: kindOf(ref.label)}
-          : ((S.refLabels[ref.t || CONFIG.tableProjets] || {})[ref.id] || {label: '#' + ref.id, kind: 'Non typé'});
+        const item = ref.label ? {label: ref.label}
+          : ((S.refLabels[ref.t || CONFIG.tableProjets] || {})[ref.id] || {label: '#' + ref.id});
         if (!seen.has(item.label)){ seen.add(item.label); r.links.push(item); }
       });
-      r.nbProjets = r.links.filter(l => l.kind === 'Projet').length;
-      r.nbActions = r.links.filter(l => l.kind === 'Action').length;
       r.comments = S.obs[r.id] || [];
     });
     rows.sort((a, b) => natCmp(a.code || '999', b.code || '999') || a.resultat.localeCompare(b.resultat, 'fr'));
@@ -521,12 +504,9 @@ function indicText(r){
   return `T0 ${fmt(r.t0)} → cible ${fmt(r.cible)}`;
 }
 function linksLabel(r){
-  const n = r.links.length; if (!n) return 'Aucun projet ni action';
-  const p = [];
-  if (r.nbProjets) p.push(`${r.nbProjets} projet${r.nbProjets > 1 ? 's' : ''}`);
-  if (r.nbActions) p.push(`${r.nbActions} action${r.nbActions > 1 ? 's' : ''}`);
-  const o = n - r.nbProjets - r.nbActions; if (o) p.push(`${o} autre${o > 1 ? 's' : ''}`);
-  return p.join(', ');
+  const n = r.links.length; if (!n) return '';
+  const s = n > 1 ? 's' : '';
+  return `${n} projet${s}/action${s} lié${s}`;
 }
 
 function renderPilotage(rows){
@@ -565,8 +545,8 @@ function renderPilotage(rows){
               ${r.comments.length ? `<span class="tag" title="${esc(r.comments[0].texte.slice(0, 200))}">${r.comments.length} commentaire${r.comments.length > 1 ? 's' : ''}, dernier le ${dFr(r.comments[0].date)}</span>` : ''}
               ${indicText(r) ? `<span>${esc(indicText(r))}</span>` : ''}</div></div>
           <div class="prog" style="--c:${ST_COLOR[r.statut]}">${stBadge(r.statut)}<span class="pb"><i style="width:${r.pct}%"></i></span><b>${pctTxt(r.pct)}</b></div>
-          <button class="links-btn ${r.links.length ? '' : 'zero'}" data-links="${r.id}" aria-expanded="${open}" ${r.links.length ? '' : 'disabled'}>${esc(linksLabel(r))}</button>
-          ${open ? `<ul class="links">${r.links.map(l => `<li>${esc(l.label)}<span class="kind">${esc(l.kind)}</span></li>`).join('')}</ul>` : ''}
+          ${r.links.length ? `<button class="links-btn" data-links="${r.id}" aria-expanded="${open}">${esc(linksLabel(r))}</button>` : '<span></span>'}
+          ${open ? `<ul class="links">${r.links.map(l => `<li>${esc(l.label)}</li>`).join('')}</ul>` : ''}
         </div>`;
       });
     }
@@ -579,7 +559,7 @@ function renderMatrice(rows){
   const el = $('#v-matrice');
   const card = r => `<button class="card" data-edit="${r.id}" style="--c:${ST_COLOR[r.statut]}">
       <span><strong>${esc(r.code || '—')}</strong> ${esc(r.resultat.replace(/^\s*[\d.]+\s*/, '').slice(0, 90))}${r.resultat.length > 90 ? '…' : ''}
-      <small>${esc(r.groupement || 'Groupement non renseigné')}, ${esc(r.statut.toLowerCase())}, ${esc(linksLabel(r).toLowerCase())}</small></span>
+      <small>${esc(r.groupement || 'Groupement non renseigné')}, ${esc(r.statut.toLowerCase())}${r.links.length ? ', ' + esc(linksLabel(r)) : ''}</small></span>
       <span class="pct">${pctTxt(r.pct)}</span></button>`;
   let html = `<div class="matrix"><div></div><div class="mhead">Facile à atteindre</div><div class="mhead">Difficile à atteindre</div>`;
   ['P1','P2','P3'].forEach(p => {
@@ -608,7 +588,7 @@ function renderSaisie(rows){
       <b>${pctTxt(x.pct)}</b><span>${esc(x.resultat.slice(0, 110))}${x.resultat.length > 110 ? '…' : ''}</span></button>`).join('')}</div>
     <div class="panel form">
       <h3>${esc(r.resultat)}</h3>
-      <div class="ctx">${esc(r.objectif)} › ${esc(r.sousObjectif)}<br>${prioBadge(r.priorite)} ${r.facile ? 'Facile : ' + r.facile.toLowerCase() + ', ' : ''}${esc(r.groupement || 'groupement non renseigné')}, ${esc(linksLabel(r).toLowerCase())}</div>
+      <div class="ctx">${esc(r.objectif)} › ${esc(r.sousObjectif)}<br>${prioBadge(r.priorite)} ${r.facile ? 'Facile : ' + r.facile.toLowerCase() + ', ' : ''}${esc(r.groupement || 'groupement non renseigné')}${r.links.length ? ', ' + esc(linksLabel(r)) : ''}</div>
       <fieldset ${canAv ? '' : 'disabled'}><legend>Réalisation</legend>
         ${canAv ? '' : '<p class="status">Suivi indisponible : colonnes Avancement et Statut absentes de la table.</p>'}
         <div class="avc">
