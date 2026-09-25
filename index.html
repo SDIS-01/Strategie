@@ -614,12 +614,13 @@ function renderMatrice(rows){
   ['P1','P2','P3'].forEach(p => {
     html += `<div class="mrow ${p}">${p}</div>`;
     ['Oui','Non'].forEach(f => {
-      const items = rows.filter(r => r.priorite === p && r.facile === f), a = aggregate(items);
-      html += `<div class="cell"><div class="ch"><strong>${MATRICE[p + '|' + f]}</strong><em>${items.length} résultat${items.length > 1 ? 's' : ''}${items.length ? ', ' + pctTxt(a.taux) : ''}</em></div>${items.map(card).join('')}</div>`;
+      const all = rows.filter(r => r.priorite === p && r.facile === f);
+      const items = all.filter(r => r.statut !== 'Réalisé'), nReal = all.length - items.length;
+      html += `<div class="cell"><div class="ch"><strong>${MATRICE[p + '|' + f]}</strong><em>${items.length} à traiter${nReal ? `, ${nReal} réalisé${nReal > 1 ? 's' : ''}` : ''}</em></div>${items.map(card).join('')}</div>`;
     });
   });
   html += `</div>`;
-  const unq = rows.filter(r => !r.priorite || !r.facile);
+  const unq = rows.filter(r => (!r.priorite || !r.facile) && r.statut !== 'Réalisé');
   if (unq.length) html += `<div class="panel unq"><h2>À qualifier (priorité ou facilité manquante) : ${unq.length}</h2><div style="padding:8px">${unq.map(card).join('')}</div></div>`;
   el.innerHTML = html;
 }
