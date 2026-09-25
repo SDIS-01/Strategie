@@ -10,7 +10,7 @@
   --ink:#2b2f36; --muted:#6e6a62; --paper:#f7f5f0; --card:#fff; --line:#e6e1d6; --track:#efebe3;
   --accent:#2f4a6d; --accent-soft:#e7ecf3;
   --p1:#b5473a; --p1-soft:#f6e3df; --p2:#a87522; --p2-soft:#f7edd9; --p3:#5e7a8c; --p3-soft:#e6edf1;
-  --s-eng:#c9cdd3; --s-cours:#d9a441; --s-real:#4e8b6a; --s-aband:#6b6f76;
+  --s-eng:#f1bcb4; --s-cours:#d9a441; --s-real:#4e8b6a; --s-aband:#6b6f76;
   --ko:#b5473a; --radius:8px;
 }
 *{box-sizing:border-box}
@@ -498,7 +498,7 @@ function render(){
   if (S.view === 'saisie') renderSaisie(rows);
 }
 const prioBadge = p => p ? `<span class="badge ${p}">${p}</span>` : `<span class="badge nd">Sans priorité</span>`;
-const ST_TEXT = {'À engager': '#3e434a', 'En cours': '#4a3508', 'Réalisé': '#fff', 'Abandonné': '#fff'};
+const ST_TEXT = {'À engager': '#7a2e24', 'En cours': '#4a3508', 'Réalisé': '#fff', 'Abandonné': '#fff'};
 const stBadge = s => `<span class="st" style="--c:${ST_COLOR[s]};color:${ST_TEXT[s]}">${esc(s)}</span>`;
 function indicText(r){
   if ([r.t0, r.cible].every(isEmpty)) return '';
