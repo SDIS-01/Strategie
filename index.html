@@ -589,7 +589,8 @@ function renderSaisie(rows){
       <b>${pctTxt(x.pct)}</b><span>${esc(x.resultat.slice(0, 110))}${x.resultat.length > 110 ? '…' : ''}</span></button>`).join('')}</div>
     <div class="panel form">
       <h3>${esc(r.resultat)}</h3>
-      <div class="ctx">${esc(r.objectif)} › ${esc(r.sousObjectif)}<br>${prioBadge(r.priorite)} ${r.facile ? 'Facile : ' + r.facile.toLowerCase() + ', ' : ''}${esc(r.groupement || 'groupement non renseigné')}${r.links.length ? ', ' + esc(linksLabel(r)) : ''}</div>
+      <div class="ctx">${esc(r.objectif)} › ${esc(r.sousObjectif)}<br>${prioBadge(r.priorite)} ${r.facile ? 'Facile : ' + r.facile.toLowerCase() + ', ' : ''}${esc(r.groupement || 'groupement non renseigné')}${r.links.length ? ` <button class="links-btn" id="sLinksBtn" aria-expanded="false">${esc(linksLabel(r))}</button>` : ''}</div>
+      ${r.links.length ? `<ul class="links" id="sLinks" hidden>${r.links.map(l => `<li>${esc(l.label)}</li>`).join('')}</ul>` : ''}
       <fieldset ${canAv ? '' : 'disabled'}><legend>Réalisation</legend>
         ${canAv ? '' : '<p class="status">Suivi indisponible : colonnes Avancement et Statut absentes de la table.</p>'}
         <div class="avc">
@@ -624,6 +625,9 @@ function renderSaisie(rows){
       </div>
     </div></div>`;
   S.dirty = false;
+  if ($('#sLinksBtn')) $('#sLinksBtn').addEventListener('click', e => {
+    const ul = $('#sLinks'); ul.hidden = !ul.hidden; e.currentTarget.setAttribute('aria-expanded', String(!ul.hidden));
+  });
   const touch = () => { S.dirty = true; validate(); };
   $('#iPr').addEventListener('input', e => { $('#iPn').value = e.target.value; touch(); });
   $('#iPn').addEventListener('input', e => { const n = Number(e.target.value); if (!isNaN(n)) $('#iPr').value = clamp(n, 0, 100); touch(); });
