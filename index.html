@@ -84,9 +84,16 @@ main{flex:1;overflow:auto;padding:12px}
 .prog .pb{height:6px;background:var(--track);border-radius:3px;overflow:hidden}
 .prog .pb i{display:block;height:100%;background:var(--c)}
 .prog b{font-size:12px}
-.links-btn{justify-self:end;border:1px solid var(--line);background:#fff;border-radius:12px;padding:2px 9px;cursor:pointer;white-space:nowrap}
+.links-btn{justify-self:end;border:1px solid var(--line);background:#fff;border-radius:12px;padding:2px 9px;cursor:pointer;white-space:normal;text-align:right}
 .links{grid-column:1 / 4;margin:4px 0 0;padding:6px 10px;background:var(--paper);border-left:3px solid var(--accent);border-radius:0;list-style:none}
-.links li{padding:2px 0}
+.links li{padding:3px 0}
+.links li.lk{display:grid;grid-template-columns:minmax(0,1fr) auto 110px 42px;gap:10px;align-items:center;border-top:1px solid var(--line)}
+.links li.lk:first-child{border-top:0}
+.links li.lk .pb{height:6px;background:var(--track);border-radius:3px;overflow:hidden}
+.links li.lk .pb i{display:block;height:100%;background:var(--c)}
+.links li.lk b{font-size:12px;text-align:right}
+.links li.lk .nd{color:var(--muted);font-size:11px}
+.st.neutre{background:var(--track);color:var(--muted)}
 table.grp{width:100%;border-collapse:collapse}
 table.grp th,table.grp td{padding:6px 8px;border-top:1px solid var(--line);text-align:right}
 table.grp th:first-child,table.grp td:first-child{text-align:left}
@@ -224,6 +231,9 @@ const CONFIG = {
             nom: ['Auteur', 'Auteur_Nom'], date: ['Date_Commentaire'], email: ['Auteur_Email']},
   tableProjets: 'Liste_PEPS_AV',
   colLibelleProjet: ['ID_Projet_Action', 'ID_Projet_Action_AV', 'Libelle', 'Intitule', 'Nom'],
+  // Avancement et statut des projets/actions liés (lus tels que calculés dans Grist)
+  colAvancementProjet: ['Avancement', 'Taux_Avancement', 'Avancement_Projet'],
+  colStatutProjet: ['Statut', 'Etat', 'Etat_Avancement'],
   // Préparation de la prochaine stratégie (colonnes facultatives)
   colsProchain: {aReformuler: ['A_reformuler'], aProposer: ['A_proposer_prochain'], reformulation: ['Reformulation_proposee']}
 };
@@ -271,7 +281,7 @@ const S = {
   strategies: [], strat: null, colIds: {}, rows: [], refLabels: {}, attached: null,
   view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', st: '', txt: '',
   selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: '', meta: null, refCache: {},
-  flags: new Set(), pc: {}
+  flags: new Set(), pc: {}, refMissing: {}
 };
 
 /* ---------- stratégies disponibles ---------- */
@@ -336,10 +346,18 @@ async function loadRefTables(tables){
       const keys = Object.keys(raw).filter(k => k !== 'id' && k !== 'manualSort' && !k.startsWith('gristHelper'));
       let lab = resolveCol(keys, CONFIG.colLibelleProjet);
       if (!lab) lab = keys.find(k => raw[k].some(x => typeof x === 'string' && x.trim())) || null;
+      const cAv = resolveCol(keys, CONFIG.colAvancementProjet), cSt = resolveCol(keys, CONFIG.colStatutProjet);
+      const miss = []; if (!cAv) miss.push(CONFIG.colAvancementProjet[0]); if (!cSt) miss.push(CONFIG.colStatutProjet[0]);
+      S.refMissing[t] = miss;
+      const stRes = cSt ? await refResolver(t, cSt) : null;
       const m = {};
       raw.id.forEach((id, i) => {
         const label = lab ? String(raw[lab][i] ?? '') : '#' + id;
-        m[id] = {label: label || '#' + id};
+        const av = cAv ? raw[cAv][i] : null;
+        const st = cSt ? (stRes ? stRes(raw[cSt][i]) : raw[cSt][i]) : null;
+        m[id] = {label: label || '#' + id,
+                 pct: cAv && !isEmpty(av) && !isNaN(Number(av)) ? readPct(av) : null,
+                 statut: isEmpty(st) ? '' : String(st).trim()};
       });
       S.refLabels[t] = m;
     } catch(e){ S.refLabels[t] = {}; }
@@ -410,13 +428,15 @@ async function load(){
       };
     });
     await loadRefTables([...refTables]);
+    const refMiss = [...refTables].filter(t => (S.refMissing[t] || []).length);
+    if (refMiss.length) banner.insertAdjacentHTML('beforeend', `<div class="banner info">${refMiss.map(t => `Colonnes introuvables dans ${esc(t)} : ${S.refMissing[t].map(esc).join(', ')}`).join(' ; ')}. L'avancement ou le statut des projets/actions liés n'est pas affiché. Ajustez CONFIG.colAvancementProjet / CONFIG.colStatutProjet si besoin.</div>`);
     await loadObservations();
     if (!S.obsCols) banner.insertAdjacentHTML('beforeend', `<div class="banner info">Table ${esc(CONFIG.tableObs)} introuvable ou incomplète (colonnes Strategie, ID_Resultat, Commentaire et Auteur requises) : les commentaires sont désactivés.</div>`);
     rows.forEach(r => {
       const seen = new Set(); r.links = [];
       r.refs.forEach(ref => {
         const item = ref.label ? {label: ref.label}
-          : ((S.refLabels[ref.t || CONFIG.tableProjets] || {})[ref.id] || {label: '#' + ref.id});
+          : ((S.refLabels[ref.t || CONFIG.tableProjets] || {})[ref.id] || {label: '#' + ref.id, pct: null, statut: ''});
         if (!seen.has(item.label)){ seen.add(item.label); r.links.push(item); }
       });
       r.comments = S.obs[r.id] || [];
@@ -533,10 +553,36 @@ function indicText(r){
   if ([r.t0, r.cible].every(isEmpty)) return '';
   return `T0 ${fmt(r.t0)} → cible ${fmt(r.cible)}`;
 }
+function linksAvg(r){
+  const v = r.links.filter(l => typeof l.pct === 'number' && !isAbandonLien(l.statut)).map(l => l.pct);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
 function linksLabel(r){
   const n = r.links.length; if (!n) return '';
-  const s = n > 1 ? 's' : '';
-  return `${n} projet${s}/action${s} lié${s}`;
+  const s = n > 1 ? 's' : '', m = linksAvg(r);
+  return `${n} projet${s}/action${s} lié${s}${m === null ? '' : ' · moy. ' + pctTxt(m)}`;
+}
+/* statut d'un projet/action lié : libellé stocké tel quel, couleur déduite du libellé */
+const isAbandonLien = st => /abandon|interromp|annul|suspen/.test(norm(st || ''));
+function lienColor(l){
+  const s = norm(l.statut || '');
+  if (!s) return typeof l.pct === 'number' ? ST_COLOR[statutAuto(l.pct)] : null;
+  if (isAbandonLien(l.statut)) return ST_COLOR['Abandonné'];
+  if (/termin|realis|clotur|fini|acheve/.test(s)) return ST_COLOR['Réalisé'];
+  if (/cours|demarr/.test(s)) return ST_COLOR['En cours'];
+  if (/engag|afaire|prevu|attente|nondemarr|planifi/.test(s)) return ST_COLOR['À engager'];
+  return null;
+}
+function lienText(l){
+  const c = lienColor(l);
+  return c === ST_COLOR['À engager'] ? ST_TEXT['À engager'] : c === ST_COLOR['En cours'] ? ST_TEXT['En cours'] : '#fff';
+}
+function linkItem(l){
+  if (l.pct === undefined) return `<li class="lk"><span>${esc(l.label)}</span><span class="nd">texte libre</span><span class="nd">non suivi</span><span></span></li>`;
+  const c = lienColor(l), st = l.statut || (typeof l.pct === 'number' ? statutAuto(l.pct) : '');
+  const badge = st ? (c ? `<span class="st" style="--c:${c};color:${lienText(l)}">${esc(st)}</span>` : `<span class="st neutre">${esc(st)}</span>`) : '<span class="nd">—</span>';
+  return `<li class="lk" style="--c:${c || 'var(--muted)'}"><span>${esc(l.label)}</span>${badge}
+    ${typeof l.pct === 'number' ? `<span class="pb"><i style="width:${l.pct}%"></i></span><b>${pctTxt(l.pct)}</b>` : '<span class="nd">avancement non renseigné</span><span></span>'}</li>`;
 }
 const hasPc = () => !!(S.pc.aReformuler || S.pc.aProposer || S.pc.reformulation);
 function flagTags(r){
@@ -581,7 +627,7 @@ function renderPilotage(rows){
               ${indicText(r) ? `<span>${esc(indicText(r))}</span>` : ''}</div>${r.reformulation ? `<div class="reform">Reformulation proposée : ${esc(r.reformulation)}</div>` : ''}</div>
           ${r.links.length ? `<button class="links-btn" data-links="${r.id}" aria-expanded="${open}">${esc(linksLabel(r))}</button>` : '<span></span>'}
           <div class="prog" style="--c:${ST_COLOR[r.statut]}">${stBadge(r.statut)}<span class="pb"><i style="width:${r.pct}%"></i></span><b>${pctTxt(r.pct)}</b></div>
-          ${open ? `<ul class="links">${r.links.map(l => `<li>${esc(l.label)}</li>`).join('')}</ul>` : ''}
+          ${open ? `<ul class="links">${r.links.map(linkItem).join('')}</ul>` : ''}
         </div>`;
       });
     }
@@ -624,7 +670,7 @@ function renderSaisie(rows){
     <div class="panel form">
       <h3>${esc(r.resultat)}</h3>
       <div class="ctx">${esc(r.objectif)} › ${esc(r.sousObjectif)}<br>${prioBadge(r.priorite)} ${r.facile ? 'Facile : ' + r.facile.toLowerCase() + ', ' : ''}${esc(r.groupement || 'groupement non renseigné')}${r.links.length ? ` <button class="links-btn" id="sLinksBtn" aria-expanded="false">${esc(linksLabel(r))}</button>` : ''}</div>
-      ${r.links.length ? `<ul class="links" id="sLinks" hidden>${r.links.map(l => `<li>${esc(l.label)}</li>`).join('')}</ul>` : ''}
+      ${r.links.length ? `<ul class="links" id="sLinks" hidden>${r.links.map(linkItem).join('')}</ul>` : ''}
       <fieldset ${canAv ? '' : 'disabled'}><legend>Réalisation</legend>
         ${canAv ? '' : '<p class="status">Suivi indisponible : colonnes Avancement et Statut absentes de la table.</p>'}
         <div class="avc">
@@ -819,7 +865,7 @@ function buildPdf(ctx, jsPDF){
     body.push([{content: T(`${o.name}  (${o.agg.n} résultats, ${expPct(o.agg.taux)})`), colSpan: 8,
       styles: {fillColor: expRgb(EXP.accentSoft), textColor: expRgb(EXP.accent), fontStyle: 'bold'}}]);
     o.rows.forEach(r => body.push([T(r.resultat), r.priorite || '-', T(r.groupement || '-'), r.statut, T(expPct(r.pct)), T(expT0(r)),
-      T(r.links.map(l => l.label).join('\n')), T(expComTxt(r))]));
+      T(r.links.map(l => l.pct === undefined ? l.label : [l.label, l.statut || (typeof l.pct === 'number' ? statutAuto(l.pct) : ''), typeof l.pct === 'number' ? expPct(l.pct) : ''].filter(Boolean).join(' — ')).join('\n')), T(expComTxt(r))]));
   });
   doc.autoTable({
     startY: 21, margin: {left: M, right: M, bottom: 14},
