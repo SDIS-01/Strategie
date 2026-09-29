@@ -147,6 +147,14 @@ textarea{min-height:70px;resize:vertical}
 .addc{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
 .addc label{width:min(100%,320px)}
 .addc textarea{width:100%;border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+
+/* Préparation de la prochaine stratégie */
+.chip[aria-pressed="true"].flag{background:var(--accent);border-color:var(--accent);color:#fff}
+.tag.flag{font-weight:600}
+.tag.flag.ref{background:var(--p2-soft);border-color:var(--p2-soft);color:var(--p2)}
+.tag.flag.pro{background:var(--accent-soft);border-color:#c9d6e6;color:var(--accent)}
+.reform{margin-top:4px;padding-left:8px;border-left:2px solid var(--p2);color:var(--muted);font-style:italic}
+label.f[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -165,6 +173,8 @@ textarea{min-height:70px;resize:vertical}
     <button class="chip P1" data-prio="P1" aria-pressed="false">P1</button>
     <button class="chip P2" data-prio="P2" aria-pressed="false">P2</button>
     <button class="chip P3" data-prio="P3" aria-pressed="false">P3</button>
+    <button class="chip flag" data-flag="ref" aria-pressed="false">À reformuler</button>
+    <button class="chip flag" data-flag="pro" aria-pressed="false">À proposer dans le prochain</button>
     <select id="fGrp" aria-label="Groupement pilote"></select>
     <select id="fObj" aria-label="Orientation"></select>
     <select id="fFac" aria-label="Facile à atteindre">
@@ -213,7 +223,9 @@ const CONFIG = {
   colsObs: {strategie: ['Strategie'], idResultat: ['ID_Resultat'], resultat: ['Resultat_Attendu'], texte: ['Commentaire'],
             nom: ['Auteur', 'Auteur_Nom'], date: ['Date_Commentaire'], email: ['Auteur_Email']},
   tableProjets: 'Liste_PEPS_AV',
-  colLibelleProjet: ['ID_Projet_Action', 'ID_Projet_Action_AV', 'Libelle', 'Intitule', 'Nom']
+  colLibelleProjet: ['ID_Projet_Action', 'ID_Projet_Action_AV', 'Libelle', 'Intitule', 'Nom'],
+  // Préparation de la prochaine stratégie (colonnes facultatives)
+  colsProchain: {aReformuler: ['A_reformuler'], aProposer: ['A_proposer_prochain'], reformulation: ['Reformulation_proposee']}
 };
 
 const STATUTS = ['À engager', 'En cours', 'Réalisé', 'Abandonné'];
@@ -258,7 +270,8 @@ const dFr = d => d ? d.toLocaleDateString('fr-FR') : '—';
 const S = {
   strategies: [], strat: null, colIds: {}, rows: [], refLabels: {}, attached: null,
   view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', st: '', txt: '',
-  selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: '', meta: null, refCache: {}
+  selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: '', meta: null, refCache: {},
+  flags: new Set(), pc: {}
 };
 
 /* ---------- stratégies disponibles ---------- */
@@ -359,6 +372,17 @@ async function load(){
     banner.innerHTML = missing.length
       ? `<div class="banner">Colonnes introuvables dans ${esc(S.strat.id)} : ${missing.map(k => esc(CONFIG.cols[k][0])).join(', ')}. Créez-les ou ajustez CONFIG.cols en tête du widget.</div>` : '';
 
+    // Colonnes facultatives de préparation de la prochaine stratégie
+    S.pc = {};
+    for (const [k, c] of Object.entries(CONFIG.colsProchain)) S.pc[k] = resolveCol(keys, c);
+    const pcMiss = Object.keys(CONFIG.colsProchain).filter(k => !S.pc[k]);
+    if (pcMiss.length) banner.insertAdjacentHTML('beforeend', `<div class="banner info">Colonnes de préparation de la prochaine stratégie absentes de ${esc(S.strat.id)} : ${pcMiss.map(k => esc(CONFIG.colsProchain[k][0])).join(', ')}. Les fonctions correspondantes sont désactivées.</div>`);
+    document.querySelectorAll('.chip[data-flag]').forEach(ch => {
+      const ok = !!S.pc[ch.dataset.flag === 'ref' ? 'aReformuler' : 'aProposer'];
+      ch.hidden = !ok;
+      if (!ok){ S.flags.delete(ch.dataset.flag); ch.setAttribute('aria-pressed', 'false'); }
+    });
+
     const resolvers = {};
     for (const k of ['objectif', 'sousObjectif', 'resultat', 'priorite', 'facile', 'groupement']){
       if (S.colIds[k]) resolvers[k] = await refResolver(S.strat.id, S.colIds[k]);
@@ -380,6 +404,9 @@ async function load(){
         groupement: String(get('groupement', i) ?? '').trim(),
         t0: get('t0', i), cible: get('cible', i), observation: get('observation', i),
         pct, statut, statutStocke: stRaw, dateMaj: dateFromGrist(get('dateMaj', i)),
+        aReformuler: S.pc.aReformuler ? raw[S.pc.aReformuler][i] === true : false,
+        aProposer: S.pc.aProposer ? raw[S.pc.aProposer][i] === true : false,
+        reformulation: S.pc.reformulation ? String(raw[S.pc.reformulation][i] ?? '').trim() : '',
       };
     });
     await loadRefTables([...refTables]);
@@ -487,7 +514,8 @@ function filtered(){
   return S.rows.filter(r =>
     (!S.prios.size || S.prios.has(r.priorite)) && (!S.grp || r.groupement === S.grp) &&
     (!S.obj || r.objectif === S.obj) && (!S.fac || r.facile === S.fac) && (!S.st || r.statut === S.st) &&
-    (!q || norm(r.resultat + ' ' + r.sousObjectif + ' ' + (r.observation || '') + ' ' + r.comments.map(c => c.texte + ' ' + c.nom).join(' ') + ' ' + r.links.map(l => l.label).join(' ')).includes(q)));
+    (!S.flags.has('ref') || r.aReformuler) && (!S.flags.has('pro') || r.aProposer) &&
+    (!q || norm(r.resultat + ' ' + r.sousObjectif + ' ' + (r.observation || '') + ' ' + r.reformulation + ' ' + r.comments.map(c => c.texte + ' ' + c.nom).join(' ') + ' ' + r.links.map(l => l.label).join(' ')).includes(q)));
 }
 
 /* ---------- rendu ---------- */
@@ -510,6 +538,11 @@ function linksLabel(r){
   const s = n > 1 ? 's' : '';
   return `${n} projet${s}/action${s} lié${s}`;
 }
+const hasPc = () => !!(S.pc.aReformuler || S.pc.aProposer || S.pc.reformulation);
+function flagTags(r){
+  return (r.aReformuler ? '<span class="tag flag ref">À reformuler</span>' : '') +
+         (r.aProposer ? '<span class="tag flag pro">À proposer dans le prochain</span>' : '');
+}
 
 function renderPilotage(rows){
   const el = $('#v-pilotage');
@@ -530,6 +563,7 @@ function renderPilotage(rows){
     <div class="kpi"><b>${a.n}</b><span>résultats attendus${a.byS['Abandonné'] ? `, dont ${a.byS['Abandonné']} abandonné${a.byS['Abandonné'] > 1 ? 's' : ''} (exclus du taux)` : ''}</span></div>
     <div class="kpi"><b style="color:var(--s-real)">${a.byS['Réalisé']}</b><span>résultat${a.byS['Réalisé'] > 1 ? 's' : ''} réalisé${a.byS['Réalisé'] > 1 ? 's' : ''}</span></div>
     <div class="kpi"><b>${dFr(lastMaj)}</b><span>dernière mise à jour${jamais ? `, ${jamais} jamais évalué${jamais > 1 ? 's' : ''}` : ''}</span></div>
+    ${hasPc() ? `<div class="kpi"><b>${rows.filter(r => r.aReformuler).length} / ${rows.filter(r => r.aProposer).length}</b><span>à reformuler / à proposer dans le prochain</span></div>` : ''}
   </div><div class="panel">`;
 
   const byObj = groupBy(rows, r => r.objectif);
@@ -541,10 +575,10 @@ function renderPilotage(rows){
         const open = S.openLinks.has(r.id);
         html += `<div class="row">
           <div><div class="title" data-edit="${r.id}" title="Ouvrir la saisie">${esc(r.resultat)}</div>
-            <div class="meta">${prioBadge(r.priorite)}${r.facile ? `<span class="tag">Facile : ${r.facile.toLowerCase()}</span>` : ''}
+            <div class="meta">${prioBadge(r.priorite)}${flagTags(r)}${r.facile ? `<span class="tag">Facile : ${r.facile.toLowerCase()}</span>` : ''}
               ${r.groupement ? `<span class="tag">${esc(r.groupement)}</span>` : ''}
               ${r.comments.length ? `<span class="tag" title="${esc(r.comments[0].texte.slice(0, 200))}">${r.comments.length} commentaire${r.comments.length > 1 ? 's' : ''}, dernier le ${dFr(r.comments[0].date)}</span>` : ''}
-              ${indicText(r) ? `<span>${esc(indicText(r))}</span>` : ''}</div></div>
+              ${indicText(r) ? `<span>${esc(indicText(r))}</span>` : ''}</div>${r.reformulation ? `<div class="reform">Reformulation proposée : ${esc(r.reformulation)}</div>` : ''}</div>
           ${r.links.length ? `<button class="links-btn" data-links="${r.id}" aria-expanded="${open}">${esc(linksLabel(r))}</button>` : '<span></span>'}
           <div class="prog" style="--c:${ST_COLOR[r.statut]}">${stBadge(r.statut)}<span class="pb"><i style="width:${r.pct}%"></i></span><b>${pctTxt(r.pct)}</b></div>
           ${open ? `<ul class="links">${r.links.map(l => `<li>${esc(l.label)}</li>`).join('')}</ul>` : ''}
@@ -560,7 +594,7 @@ function renderMatrice(rows){
   const el = $('#v-matrice');
   const card = r => `<button class="card" data-edit="${r.id}" style="--c:${ST_COLOR[r.statut]}">
       <span><strong>${esc(r.code || '—')}</strong> ${esc(r.resultat.replace(/^\s*[\d.]+\s*/, '').slice(0, 90))}${r.resultat.length > 90 ? '…' : ''}
-      <small>${esc(r.groupement || 'Groupement non renseigné')}, ${esc(r.statut.toLowerCase())}${r.links.length ? ', ' + esc(linksLabel(r)) : ''}</small></span>
+      <small>${esc(r.groupement || 'Groupement non renseigné')}, ${esc(r.statut.toLowerCase())}${r.links.length ? ', ' + esc(linksLabel(r)) : ''}${r.aReformuler ? ', à reformuler' : ''}${r.aProposer ? ', à proposer dans le prochain' : ''}</small></span>
       <span class="pct">${pctTxt(r.pct)}</span></button>`;
   let html = `<div class="matrix"><div></div><div class="mhead">Facile à atteindre</div><div class="mhead">Difficile à atteindre</div>`;
   ['P1','P2','P3'].forEach(p => {
@@ -609,6 +643,14 @@ function renderSaisie(rows){
           <label class="f">Cible<input id="iCi" inputmode="decimal" value="${v(r.cible)}"></label>
         </div>
       </fieldset>
+      <fieldset ${hasPc() ? '' : 'disabled'}><legend>Prochaine stratégie</legend>
+        ${hasPc() ? '' : '<p class="status">Indisponible : colonnes A_reformuler, A_proposer_prochain et Reformulation_proposee absentes de la table.</p>'}
+        <div class="avc-foot" style="margin-top:0">
+          ${S.pc.aReformuler ? `<label class="check"><input type="checkbox" id="iRf" ${r.aReformuler ? 'checked' : ''}> À reformuler</label>` : ''}
+          ${S.pc.aProposer ? `<label class="check"><input type="checkbox" id="iPp" ${r.aProposer ? 'checked' : ''}> À proposer dans le prochain</label>` : ''}
+        </div>
+        ${S.pc.reformulation ? `<label class="f" id="lRf" style="margin-top:10px" ${S.pc.aReformuler && !r.aReformuler && !r.reformulation ? 'hidden' : ''}>Reformulation proposée<textarea id="iRt">${esc(r.reformulation)}</textarea></label>` : ''}
+      </fieldset>
       <fieldset><legend>Commentaires</legend>
         <div id="thread">${threadHtml(r)}</div>
         ${S.obsCols ? `<div class="addc">
@@ -633,6 +675,12 @@ function renderSaisie(rows){
   $('#iPn').addEventListener('input', e => { const n = Number(e.target.value); if (!isNaN(n)) $('#iPr').value = clamp(n, 0, 100); touch(); });
   $('#iAb').addEventListener('change', touch);
   ['iT0','iCi'].forEach(id => $('#' + id).addEventListener('input', touch));
+  ['iRf','iPp'].forEach(id => { if ($('#' + id)) $('#' + id).addEventListener('change', touch); });
+  if ($('#iRt')) $('#iRt').addEventListener('input', touch);
+  if ($('#iRf') && $('#lRf')) $('#iRf').addEventListener('change', e => {
+    $('#lRf').hidden = !e.target.checked && !$('#iRt').value.trim();
+    if (e.target.checked) $('#iRt').focus();
+  });
   if ($('#iCm')){
     const okCm = () => { $('#addCm').disabled = !$('#iCm').value.trim() || !$('#iAu').value.trim(); $('#cmStatus').textContent = ''; };
     ['iCm','iAu'].forEach(id => $('#' + id).addEventListener('input', e => { e.target.classList.remove('invalid'); okCm(); }));
@@ -656,6 +704,10 @@ function validate(){
   mark('iT0', Number.isNaN(f.t0)); if (Number.isNaN(f.t0)) err.push('Valeur T0 : saisissez un nombre.');
   mark('iCi', Number.isNaN(f.ci)); if (Number.isNaN(f.ci)) err.push('Cible : saisissez un nombre.');
   if (f.t0 !== null && f.ci === null) wrn.push('Valeur T0 saisie sans cible.');
+  f.rf = $('#iRf') ? $('#iRf').checked : null;
+  f.pp = $('#iPp') ? $('#iPp').checked : null;
+  f.rt = $('#iRt') ? $('#iRt').value.trim() : null;
+  if (f.rf && f.rt === '') wrn.push('« À reformuler » coché sans reformulation proposée.');
   f.statut = f.ab ? 'Abandonné' : statutAuto(pBad ? 0 : f.pct);
   $('#stPrev').innerHTML = stBadge(f.statut);
   $('#msgs').innerHTML = err.map(m => `<li class="err">${esc(m)}</li>`).join('') + wrn.map(m => `<li class="wrn">${esc(m)}</li>`).join('');
@@ -669,6 +721,9 @@ async function save(){
   const c = S.colIds, fields = {};
   if (c.t0) fields[c.t0] = f.t0;
   if (c.cible) fields[c.cible] = f.ci;
+  if (S.pc.aReformuler && f.rf !== null) fields[S.pc.aReformuler] = f.rf;
+  if (S.pc.aProposer && f.pp !== null) fields[S.pc.aProposer] = f.pp;
+  if (S.pc.reformulation && f.rt !== null) fields[S.pc.reformulation] = f.rt;
   if (c.avancement && c.statut){
     fields[c.avancement] = f.pct / 100;
     fields[c.statut] = f.statut;
@@ -790,6 +845,28 @@ function buildPdf(ctx, jsPDF){
     }
   });
 
+  // Annexe : préparation de la prochaine stratégie
+  const prep = ctx.prochain ? ctx.rows.filter(r => r.aReformuler || r.aProposer || r.reformulation) : [];
+  if (prep.length){
+    doc.addPage();
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); color('setTextColor', EXP.accent);
+    doc.text('Préparation de la prochaine stratégie', M, 16);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); color('setTextColor', EXP.muted);
+    doc.text(T(`${prep.filter(r => r.aReformuler).length} à reformuler, ${prep.filter(r => r.aProposer).length} à proposer dans le prochain`), M, 22);
+    doc.autoTable({
+      startY: 26, margin: {left: M, right: M, bottom: 14},
+      head: [['Résultat attendu', 'Orientation', 'Statut', 'Avct', 'À reformuler', 'À proposer', 'Reformulation proposée']],
+      body: prep.map(r => [T(r.resultat), T(r.objectif), r.statut, T(expPct(r.pct)), r.aReformuler ? 'Oui' : '', r.aProposer ? 'Oui' : '', T(r.reformulation)]),
+      styles: {font: 'helvetica', fontSize: 7.5, cellPadding: 1.6, textColor: expRgb(EXP.ink), lineColor: expRgb(EXP.line), lineWidth: 0.1, valign: 'middle'},
+      headStyles: {fillColor: expRgb(EXP.accent), textColor: [255, 255, 255], fontStyle: 'bold'},
+      columnStyles: {0: {cellWidth: 75}, 1: {cellWidth: 45}, 2: {cellWidth: 19, halign: 'center'}, 3: {cellWidth: 12, halign: 'right', fontStyle: 'bold'},
+                     4: {cellWidth: 18, halign: 'center', fontStyle: 'bold'}, 5: {cellWidth: 18, halign: 'center', fontStyle: 'bold'}, 6: {cellWidth: 'auto'}},
+      didParseCell: d => {
+        if (d.section === 'body' && d.column.index === 2 && EXP.st[d.cell.raw]){ d.cell.styles.fillColor = expRgb(EXP.st[d.cell.raw]); d.cell.styles.textColor = expRgb(EXP.stText[d.cell.raw]); }
+      }
+    });
+  }
+
   // liens de la synthèse vers le détail de chaque orientation
   synRows.forEach((r, i) => { const t = targets[i]; if (!r || !t) return;
     doc.setPage(r.page); doc.link(r.x, r.y, r.r - r.x, r.h, {pageNumber: t.page, top: Math.max(t.y - 6, 0)}); });
@@ -823,9 +900,11 @@ function exportCtx(){
   if (S.obj) f.push('orientation ' + S.obj);
   if (S.fac) f.push('facile à atteindre : ' + S.fac.toLowerCase());
   if (S.st) f.push('statut ' + S.st);
+  if (S.flags.has('ref')) f.push('à reformuler');
+  if (S.flags.has('pro')) f.push('à proposer dans le prochain');
   if (S.txt) f.push('recherche « ' + S.txt + ' »');
   const byObj = [...groupBy(rows, r => r.objectif)].map(([name, rs]) => ({name, rows: rs, agg: aggregate(rs)}));
-  return {strat: S.strat, date: new Date(), filtres: f.length ? f.join(' ; ') : 'Aucun filtre', rows, agg: aggregate(rows), byObj};
+  return {strat: S.strat, date: new Date(), filtres: f.length ? f.join(' ; ') : 'Aucun filtre', rows, agg: aggregate(rows), byObj, prochain: hasPc()};
 }
 function download(blob, name){
   const url = URL.createObjectURL(blob), a = document.createElement('a');
@@ -870,7 +949,11 @@ $('#strat').addEventListener('change', async e => {
 });
 $('#refresh').addEventListener('click', () => { if (confirmLeave()){ S.dirty = false; S.refLabels = {}; S.meta = null; S.refCache = {}; load(); } });
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setView(t.dataset.view)));
-document.querySelectorAll('.chip').forEach(ch => ch.addEventListener('click', () => {
+document.querySelectorAll('.chip[data-flag]').forEach(ch => ch.addEventListener('click', () => {
+  const k = ch.dataset.flag; S.flags.has(k) ? S.flags.delete(k) : S.flags.add(k);
+  ch.setAttribute('aria-pressed', S.flags.has(k)); render();
+}));
+document.querySelectorAll('.chip[data-prio]').forEach(ch => ch.addEventListener('click', () => {
   const p = ch.dataset.prio; S.prios.has(p) ? S.prios.delete(p) : S.prios.add(p);
   ch.setAttribute('aria-pressed', S.prios.has(p)); render();
 }));
@@ -880,7 +963,7 @@ $('#fFac').addEventListener('change', e => { S.fac = e.target.value; render(); }
 $('#fSt').addEventListener('change', e => { S.st = e.target.value; render(); });
 $('#fTxt').addEventListener('input', e => { S.txt = e.target.value; render(); });
 $('#reset').addEventListener('click', () => {
-  S.prios.clear(); S.grp = S.obj = S.fac = S.st = S.txt = '';
+  S.prios.clear(); S.flags.clear(); S.grp = S.obj = S.fac = S.st = S.txt = '';
   document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', 'false'));
   $('#fGrp').value = $('#fObj').value = $('#fFac').value = $('#fSt').value = $('#fTxt').value = '';
   render();
