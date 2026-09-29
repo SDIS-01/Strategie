@@ -132,6 +132,17 @@ legend{font-weight:700;color:var(--accent);padding:0 4px}
 .avc-foot{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:10px}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 label.f{display:flex;flex-direction:column;gap:4px;font-weight:600}
+.qual{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:760px){.qual{grid-template-columns:1fr}}
+.qual .ql{font-weight:600;margin-bottom:4px}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:#fff}
+.seg label{display:flex;align-items:center;padding:4px 10px;cursor:pointer;border-left:1px solid var(--line);font-weight:600}
+.seg label:first-child{border-left:0}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg input:checked + span{color:#fff}
+.seg label:has(input:checked){background:var(--accent);color:#fff}
+.seg label:has(input:checked).P1{background:var(--p1)}.seg label:has(input:checked).P2{background:var(--p2)}.seg label:has(input:checked).P3{background:var(--p3)}
+.seg label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
 label.f input,label.f textarea{border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-weight:400;background:#fff}
 label.full{grid-column:1 / 3}
 textarea{min-height:70px;resize:vertical}
@@ -281,7 +292,7 @@ const S = {
   strategies: [], strat: null, colIds: {}, rows: [], refLabels: {}, attached: null,
   view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', st: '', txt: '',
   selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: '', meta: null, refCache: {},
-  flags: new Set(), pc: {}, refMissing: {}
+  flags: new Set(), pc: {}, refMissing: {}, qual: {}
 };
 
 /* ---------- stratégies disponibles ---------- */
@@ -319,7 +330,9 @@ async function loadMeta(){
   const t = await grist.docApi.fetchTable('_grist_Tables');
   const c = await grist.docApi.fetchTable('_grist_Tables_column');
   const tables = {}; t.id.forEach((id, i) => tables[id] = t.tableId[i]);
-  const cols = c.id.map((id, i) => ({id, table: tables[c.parentId[i]], colId: c.colId[i], type: c.type[i], visibleCol: c.visibleCol[i]}));
+  const cols = c.id.map((id, i) => ({id, table: tables[c.parentId[i]], colId: c.colId[i], type: c.type[i], visibleCol: c.visibleCol[i],
+    isFormula: !!(c.isFormula && c.isFormula[i] && String(c.formula ? c.formula[i] : '').trim()),
+    widgetOptions: c.widgetOptions ? c.widgetOptions[i] : ''}));
   return S.meta = {cols, byId: Object.fromEntries(cols.map(x => [x.id, x]))};
 }
 async function refResolver(tableId, colId){
@@ -337,6 +350,61 @@ async function refResolver(tableId, colId){
     return v => Array.isArray(v) && v[0] === 'L' ? v.slice(1).map(one).filter(x => x !== '').join(', ') : one(v);
   } catch(e){ return null; }
 }
+
+/* ---------- priorité / facilité : mode d'écriture selon le type de colonne ---------- */
+const QUAL_VALS = {priorite: ['P1', 'P2', 'P3'], facile: ['Oui', 'Non']};
+const qualNorm = (k, v) => k === 'priorite' ? normPrio(v) : normFac(v);
+async function qualInfo(k){
+  const colId = S.colIds[k]; if (!colId) return {mode: 'absent'};
+  try {
+    const m = await loadMeta();
+    const col = m.cols.find(x => x.table === S.strat.id && x.colId === colId);
+    if (!col) return {mode: 'texte', colId};
+    if (col.isFormula) return {mode: 'formule', colId};
+    const type = String(col.type);
+    if (type === 'Bool') return {mode: 'bool', colId};
+    const tm = type.match(/^Ref:(.+)$/);
+    if (tm){
+      const target = tm[1];
+      S.refCache[target] = S.refCache[target] || await grist.docApi.fetchTable(target);
+      const raw = S.refCache[target];
+      let lab = col.visibleCol && m.byId[col.visibleCol] ? m.byId[col.visibleCol].colId : null;
+      if (!lab || !raw[lab]) lab = Object.keys(raw).find(x => x !== 'id' && x !== 'manualSort' && !x.startsWith('gristHelper') && raw[x].some(v => typeof v === 'string' && v.trim()));
+      const map = {};
+      raw.id.forEach((id, i) => { const n = qualNorm(k, lab ? raw[lab][i] : ''); if (n && !map[n]) map[n] = id; });
+      return {mode: 'ref', colId, map};
+    }
+    if (/^RefList:/.test(type)) return {mode: 'formule', colId, raison: 'colonne de type liste de références'};
+    if (type === 'Choice' || type === 'ChoiceList'){
+      let choices = []; try { choices = JSON.parse(col.widgetOptions || '{}').choices || []; } catch(e){}
+      const map = {}; choices.forEach(c => { const n = qualNorm(k, c); if (n && !map[n]) map[n] = c; });
+      return {mode: type === 'ChoiceList' ? 'choicelist' : 'choice', colId, map};
+    }
+    return {mode: 'texte', colId};
+  } catch(e){ return {mode: 'texte', colId}; }
+}
+function qualWrite(k, v){ // v : 'P1'…, 'Oui', 'Non' ou '' (non défini)
+  const q = S.qual[k];
+  if (q.mode === 'bool') return v === 'Oui';
+  if (q.mode === 'ref') return v ? (q.map[v] || 0) : 0;
+  if (q.mode === 'choice') return v ? (q.map[v] || v) : null;
+  if (q.mode === 'choicelist') return v ? ['L', q.map[v] || v] : null;
+  return v || '';
+}
+function qualAvail(k){ // valeurs proposables ; null = saisie impossible
+  const q = S.qual[k]; if (!q || q.mode === 'absent' || q.mode === 'formule') return null;
+  const vals = QUAL_VALS[k].filter(v => q.mode !== 'ref' || q.map[v]);
+  return q.mode === 'bool' ? vals : [...vals, ''];
+}
+function qualField(k, titre, cur){
+  const q = S.qual[k], vals = qualAvail(k);
+  if (!vals) return `<div><div class="ql">${titre}</div><p class="status">${q && q.mode === 'formule' ? `Non modifiable ici : ${esc(q.raison || 'colonne calculée par formule dans Grist')}.` : 'Colonne absente de la table.'}</p></div>`;
+  const miss = QUAL_VALS[k].filter(v => !vals.includes(v));
+  return `<div><div class="ql" id="ql-${k}">${titre}</div><div class="seg" role="radiogroup" aria-labelledby="ql-${k}">
+    ${vals.map(v => `<label class="${v}"><input type="radio" name="q-${k}" value="${v}" ${cur === v ? 'checked' : ''}><span>${v || 'Non défini'}</span></label>`).join('')}</div>
+    ${miss.length ? `<p class="status">Valeur${miss.length > 1 ? 's' : ''} ${miss.join(', ')} absente${miss.length > 1 ? 's' : ''} de la table de référence.</p>` : ''}</div>`;
+}
+const qualVal = k => { const i = document.querySelector(`input[name="q-${k}"]:checked`); return i ? i.value : null; };
 
 async function loadRefTables(tables){
   for (const t of tables){
@@ -401,6 +469,7 @@ async function load(){
       if (!ok){ S.flags.delete(ch.dataset.flag); ch.setAttribute('aria-pressed', 'false'); }
     });
 
+    S.qual = {priorite: await qualInfo('priorite'), facile: await qualInfo('facile')};
     const resolvers = {};
     for (const k of ['objectif', 'sousObjectif', 'resultat', 'priorite', 'facile', 'groupement']){
       if (S.colIds[k]) resolvers[k] = await refResolver(S.strat.id, S.colIds[k]);
@@ -671,6 +740,9 @@ function renderSaisie(rows){
       <h3>${esc(r.resultat)}</h3>
       <div class="ctx">${esc(r.objectif)} › ${esc(r.sousObjectif)}<br>${prioBadge(r.priorite)} ${r.facile ? 'Facile : ' + r.facile.toLowerCase() + ', ' : ''}${esc(r.groupement || 'groupement non renseigné')}${r.links.length ? ` <button class="links-btn" id="sLinksBtn" aria-expanded="false">${esc(linksLabel(r))}</button>` : ''}</div>
       ${r.links.length ? `<ul class="links" id="sLinks" hidden>${r.links.map(linkItem).join('')}</ul>` : ''}
+      <fieldset><legend>Qualification</legend>
+        <div class="qual">${qualField('priorite', 'Priorité', r.priorite)}${qualField('facile', 'Facile à atteindre', r.facile)}</div>
+      </fieldset>
       <fieldset ${canAv ? '' : 'disabled'}><legend>Réalisation</legend>
         ${canAv ? '' : '<p class="status">Suivi indisponible : colonnes Avancement et Statut absentes de la table.</p>'}
         <div class="avc">
@@ -720,6 +792,7 @@ function renderSaisie(rows){
   $('#iPr').addEventListener('input', e => { $('#iPn').value = e.target.value; touch(); });
   $('#iPn').addEventListener('input', e => { const n = Number(e.target.value); if (!isNaN(n)) $('#iPr').value = clamp(n, 0, 100); touch(); });
   $('#iAb').addEventListener('change', touch);
+  document.querySelectorAll('input[name="q-priorite"],input[name="q-facile"]').forEach(i => i.addEventListener('change', touch));
   ['iT0','iCi'].forEach(id => $('#' + id).addEventListener('input', touch));
   ['iRf','iPp'].forEach(id => { if ($('#' + id)) $('#' + id).addEventListener('change', touch); });
   if ($('#iRt')) $('#iRt').addEventListener('input', touch);
@@ -765,6 +838,10 @@ async function save(){
   const {ok, f} = validate(); if (!ok) return;
   const r = S.rows.find(x => x.id === S.selectedId);
   const c = S.colIds, fields = {};
+  for (const k of ['priorite', 'facile']){
+    const v = qualVal(k);
+    if (v !== null && qualAvail(k) && v !== r[k]) fields[c[k]] = qualWrite(k, v);
+  }
   if (c.t0) fields[c.t0] = f.t0;
   if (c.cible) fields[c.cible] = f.ci;
   if (S.pc.aReformuler && f.rf !== null) fields[S.pc.aReformuler] = f.rf;
