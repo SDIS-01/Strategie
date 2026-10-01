@@ -226,6 +226,21 @@ label.f[hidden]{display:none}
 .efoot label{display:flex;align-items:center;gap:6px}
 .efoot input{border:1px solid var(--line);border-radius:6px;padding:5px 8px;background:#fff}
 .efoot .sp{margin-left:auto;display:flex;gap:8px}
+.lk2{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(120px,170px) 28px;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.lk2:first-child{border-top:0}
+.lk2.ro{color:var(--muted)}
+.lk2 .pb{height:6px;background:var(--track);border-radius:3px;overflow:hidden;display:block;margin-top:3px}
+.lk2 .pb i{display:block;height:100%;background:var(--c)}
+.lk2 small{color:var(--muted);font-size:11px}
+.lnk-add{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.lnk-add input{flex:1;min-width:200px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:#fff}
+.lnk-add select{border:1px solid var(--line);border-radius:6px;padding:5px 6px;background:#fff;max-width:260px}
+.dd{border:1px solid var(--line);border-radius:6px;margin-top:4px;overflow:hidden;background:#fff}
+.dd button{display:flex;justify-content:space-between;gap:8px;width:100%;border:0;border-top:1px solid var(--line);background:#fff;padding:6px 10px;text-align:left;cursor:pointer}
+.dd button:first-child{border-top:0}
+.dd button:hover,.dd button:focus-visible{background:var(--accent-soft)}
+.dd button small{color:var(--muted)}
+@media (max-width:760px){.lk2{grid-template-columns:minmax(0,1fr) 28px}.lk2>.tag,.lk2>.prog2{grid-column:1}}
 .row.flash{animation:flash 2.5s ease-out}
 @keyframes flash{from{background:var(--accent-soft)}to{background:transparent}}
 @media (prefers-reduced-motion:reduce){.row.flash{animation:none;background:var(--accent-soft)}}
@@ -362,7 +377,7 @@ const S = {
   view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', st: '', txt: '',
   selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: '', meta: null, refCache: {},
   flags: new Set(), pc: {}, refMissing: {}, qual: {},
-  pv: null, pvLoading: null, pvSel: null, pvScope: '', pvNat: '', pvTxt: '', pvNoLink: false, gotoRow: null, pvEdit: null, pvMsg: ''
+  pv: null, pvLoading: null, pvSel: null, pvScope: '', pvNat: '', pvTxt: '', pvNoLink: false, gotoRow: null, pvEdit: null, pvMsg: '', lnkPick: null
 };
 
 /* ---------- stratégies disponibles ---------- */
@@ -806,8 +821,7 @@ function renderSaisie(rows){
       <b>${pctTxt(x.pct)}</b><span>${esc(x.resultat.slice(0, 110))}${x.resultat.length > 110 ? '…' : ''}</span></button>`).join('')}</div>
     <div class="panel form">
       <h3>${esc(r.resultat)}</h3>
-      <div class="ctx">${esc(r.objectif)} › ${esc(r.sousObjectif)}<br>${prioBadge(r.priorite)} ${r.facile ? 'Facile : ' + r.facile.toLowerCase() + ', ' : ''}${esc(r.groupement || 'groupement non renseigné')}${r.links.length ? ` <button class="links-btn" id="sLinksBtn" aria-expanded="false">${esc(linksLabel(r))}</button>` : ''}</div>
-      ${r.links.length ? `<ul class="links" id="sLinks" hidden>${r.links.map(linkItem).join('')}</ul>` : ''}
+      <div class="ctx">${esc(r.objectif)} › ${esc(r.sousObjectif)}<br>${prioBadge(r.priorite)} ${r.facile ? 'Facile : ' + r.facile.toLowerCase() + ', ' : ''}${esc(r.groupement || 'groupement non renseigné')}</div>
       <fieldset><legend>Qualification</legend>
         <div class="qual">${qualField('priorite', 'Priorité', r.priorite)}${qualField('facile', 'Facile à atteindre', r.facile)}</div>
       </fieldset>
@@ -845,6 +859,7 @@ function renderSaisie(rows){
           <span><button class="btn ghost" id="addCm" disabled>Ajouter le commentaire</button> <span class="status" id="cmStatus"></span></span></div>`
           : '<p class="status">Commentaires indisponibles : table Observations absente.</p>'}
       </fieldset>
+      <fieldset id="lnkFs"><legend>Projets et actions liés</legend><div id="lnkBody"><p class="status">Chargement…</p></div></fieldset>
       <ul class="msgs" id="msgs"></ul>
       <div class="actions">
         <button class="btn" id="save" disabled>Enregistrer</button>
@@ -853,9 +868,8 @@ function renderSaisie(rows){
       </div>
     </div></div>`;
   S.dirty = false;
-  if ($('#sLinksBtn')) $('#sLinksBtn').addEventListener('click', e => {
-    const ul = $('#sLinks'); ul.hidden = !ul.hidden; e.currentTarget.setAttribute('aria-expanded', String(!ul.hidden));
-  });
+  S.lnkPick = null;
+  lnkWire(); lnkFill();
   const touch = () => { S.dirty = true; validate(); };
   $('#iPr').addEventListener('input', e => { $('#iPn').value = e.target.value; touch(); });
   $('#iPn').addEventListener('input', e => { const n = Number(e.target.value); if (!isNaN(n)) $('#iPr').value = clamp(n, 0, 100); touch(); });
@@ -876,6 +890,111 @@ function renderSaisie(rows){
   $('#save').addEventListener('click', save);
   $('#cancel').addEventListener('click', () => renderSaisie(filtered()));
   validate();
+}
+
+
+/* ---------- onglet Saisie : projets et actions liés au résultat (écriture sur les lignes PEPS/AV de Liste_Action_MEO) ---------- */
+function lnkFill(){
+  const rid = S.selectedId, sid = S.strat.id;
+  ensurePv().then(() => { if (S.view === 'saisie' && S.selectedId === rid && S.strat.id === sid && $('#lnkBody')) lnkRender(); })
+    .catch(e => { if ($('#lnkBody')) $('#lnkBody').innerHTML = `<p class="status">Lecture impossible : ${esc(e.message || e)}.</p>`; });
+}
+function lnkCtx(){
+  const sid = S.strat.id, rid = S.selectedId, row = S.pv.results.find(x => x.strat.id === sid && x.id === rid);
+  return {sid, rid, row, projs: row ? row.projets.map(k => S.pv.projets.get(k)).filter(Boolean) : []};
+}
+function lnkRender(){
+  const {sid, rid, projs} = lnkCtx(), meo = S.pv.meo, writable = !!(meo && meo.natCol && meo.stratCols[sid]);
+  const line = p => {
+    const via = viaMeo(p, sid, rid), info = rattachInfo(p), canDel = writable && info.ok && via.length;
+    const lien = {label: p.label, pct: p.pct, statut: p.statut}, c = p.pct === undefined ? null : lienColor(lien);
+    const st = p.statut || (typeof p.pct === 'number' ? statutAuto(p.pct) : '');
+    const autre = viaAutre(p, sid, rid)[0];
+    const why = p.libre ? 'texte libre, non modifiable ici' : via.length ? '' : autre ? `lien porté par une ligne ${autre.nature || 'hors PEPS/AV'}, non modifiable ici` : 'non modifiable ici';
+    return `<div class="lk2 ${canDel ? '' : 'ro'}"><span>${esc(p.label)}${why ? `<br><small>${esc(why)}</small>` : ''}</span>
+      ${p.nature ? `<span class="tag">${esc(p.nature)}</span>` : '<span></span>'}
+      <span class="prog2" style="--c:${c || 'var(--muted)'}">${st ? esc(st) : ''}${typeof p.pct === 'number' ? ` ${pctTxt(p.pct)}<span class="pb"><i style="width:${p.pct}%"></i></span>` : ''}</span>
+      ${canDel ? `<button class="pdel" data-lnkdel="${esc(p.key)}" aria-label="Détacher ${esc(p.label)}" title="Détacher de ce résultat">×</button>` : '<span></span>'}</div>`;
+  };
+  let html = projs.length ? projs.sort((a, b) => a.label.localeCompare(b.label, 'fr')).map(line).join('') : '<p class="status">Aucun projet ni action rattaché à ce résultat.</p>';
+  if (!writable) html += `<p class="status">${!meo ? `Table ${esc(CONFIG.tableMEO)} introuvable` : !meo.natCol ? `Colonne ${esc(CONFIG.colNatureMEO[0])} introuvable dans ${esc(meo.table)}`
+    : meo.roStrat[sid] ? `Colonne ${esc(meo.roStrat[sid])} de ${esc(meo.table)} calculée par formule` : `Aucune colonne de ${esc(meo.table)} ne pointe vers ${esc(sid)}`} : rattachement impossible.</p>`;
+  else html += `<div class="lnk-add">
+      <input id="lnkQ" type="search" placeholder="Rechercher un projet PEPS ou AV…" aria-label="Projet à rattacher" autocomplete="off" aria-controls="lnkDd">
+      <span id="lnkSel"></span>
+      <button class="btn ghost" id="lnkAdd">Rattacher</button></div>
+    <div class="dd" id="lnkDd" role="listbox" hidden></div>
+    <p class="status" id="lnkStatus" role="status">Enregistré immédiatement et tracé dans Observations, au nom de l'auteur saisi dans le bloc Commentaires.</p>`;
+  $('#lnkBody').innerHTML = html;
+}
+function lnkCandidates(q){
+  const {sid, rid} = lnkCtx(), n = norm(q);
+  return [...S.pv.projets.values()].filter(p => rattachInfo(p).ok && !viaMeo(p, sid, rid).length && (!n || norm(p.label + ' ' + p.nature).includes(n)))
+    .sort((a, b) => a.label.localeCompare(b.label, 'fr')).slice(0, 8);
+}
+function lnkWire(){
+  const fs = $('#lnkFs'); if (!fs) return;
+  fs.addEventListener('input', e => {
+    if (e.target.id !== 'lnkQ') return;
+    S.lnkPick = null; $('#lnkSel').innerHTML = ''; $('#lnkStatus').textContent = '';
+    const c = e.target.value.trim() ? lnkCandidates(e.target.value) : [], dd = $('#lnkDd');
+    dd.innerHTML = c.length ? c.map(p => `<button role="option" data-lnkpick="${esc(p.key)}"><span>${esc(p.label)}</span><small>${esc(p.nature)}</small></button>`).join('')
+      : (e.target.value.trim() ? '<p class="status" style="padding:6px 10px;margin:0">Aucun projet PEPS ou AV rattachable ne correspond.</p>' : '');
+    dd.hidden = !e.target.value.trim();
+  });
+  fs.addEventListener('keydown', e => {
+    if (e.target.id === 'lnkQ' && e.key === 'ArrowDown'){ const b = $('#lnkDd button'); if (b){ e.preventDefault(); b.focus(); } }
+    if (e.target.id === 'lnkQ' && e.key === 'Enter'){ e.preventDefault(); const b = $('#lnkDd button'); if (!S.lnkPick && b) b.click(); else if (S.lnkPick) lnkApply(S.lnkPick, true); }
+    if (e.key === 'Escape' && $('#lnkDd')) $('#lnkDd').hidden = true;
+  });
+  fs.addEventListener('click', e => {
+    const pk = e.target.closest('[data-lnkpick]');
+    if (pk){
+      const p = S.pv.projets.get(pk.dataset.lnkpick), lines = meoOf(p);
+      S.lnkPick = p.key; $('#lnkQ').value = p.label; $('#lnkDd').hidden = true;
+      $('#lnkSel').innerHTML = lines.length > 1 ? `<select id="lnkLine" aria-label="Ligne PEPS/AV portant le lien">${lines.map(a => `<option value="${a.id}">${esc(a.label)} (${esc(a.nature)})</option>`).join('')}</select>` : '';
+      $('#lnkAdd').focus(); return;
+    }
+    if (e.target.closest('#lnkAdd')){
+      if (!S.lnkPick){ $('#lnkStatus').textContent = 'Choisissez un projet dans la liste.'; $('#lnkQ').focus(); return; }
+      lnkApply(S.lnkPick, true); return;
+    }
+    const dl = e.target.closest('[data-lnkdel]'); if (dl) lnkApply(dl.dataset.lnkdel, false);
+  });
+}
+async function lnkApply(key, on){
+  const {sid, rid, row} = lnkCtx(), p = S.pv.projets.get(key), meo = S.pv.meo, col = meo.stratCols[sid];
+  const status = t => { if ($('#lnkStatus')) $('#lnkStatus').textContent = t; };
+  const auteur = $('#iAu') ? $('#iAu').value.trim() : '';
+  if (S.obsCols && !auteur){ $('#iAu').classList.add('invalid'); $('#iAu').focus(); status("Renseignez l'auteur dans le bloc Commentaires pour la traçabilité."); return; }
+  if (!on && !confirm(`Détacher le projet « ${p.label} » de ce résultat ?`)) return;
+  if (auteur) S.auteur = auteur;
+  const actions = [];
+  if (on){
+    const lines = meoOf(p), a = lines.find(x => x.id === +($('#lnkLine') ? $('#lnkLine').value : 0)) || lines[0];
+    actions.push(['UpdateRecord', meo.table, a.id, {[col]: ['L', ...[...new Set([...(a.links[sid] || []), rid])].sort((x, y) => x - y)]}]);
+  } else {
+    viaMeo(p, sid, rid).forEach(a => actions.push(['UpdateRecord', meo.table, a.id, {[col]: ['L', ...(a.links[sid] || []).filter(x => x !== rid)]}]));
+  }
+  if (S.obsCols){
+    const c = S.obsCols, rec = {}; rec[c.strategie] = sid; rec[c.idResultat] = rid; rec[c.nom] = auteur;
+    rec[c.texte] = `Projet « ${p.label} » ${on ? 'rattaché à' : 'détaché de'} ce résultat (widget de pilotage).`;
+    if (c.date) rec[c.date] = Date.now() / 1000; if (c.resultat && row) rec[c.resultat] = row.resultat;
+    actions.push(['AddRecord', CONFIG.tableObs, null, rec]);
+  }
+  status('Enregistrement…');
+  try { await grist.docApi.applyUserActions(actions); }
+  catch(e){ status("Échec de l'enregistrement : " + (e.message || e)); return; }
+  // rafraîchissement local, sans toucher aux saisies en cours dans le formulaire
+  S.pv = null; S.pvLoading = null; S.lnkPick = null;
+  try { await ensurePv(); } catch(e){}
+  const r = S.rows.find(x => x.id === rid), nr = S.pv && S.pv.results.find(x => x.strat.id === sid && x.id === rid);
+  if (r && nr) r.links = nr.projets.map(k => { const q = S.pv.projets.get(k); return q.libre ? {label: q.label} : {label: q.label, pct: q.pct, statut: q.statut}; });
+  await loadObservations(); S.rows.forEach(x => x.comments = S.obs[x.id] || []);
+  if (S.view === 'saisie' && S.selectedId === rid && $('#lnkBody')){
+    lnkRender(); if (r && $('#thread')) $('#thread').innerHTML = threadHtml(r);
+    status(`Projet « ${p.label} » ${on ? 'rattaché' : 'détaché'}${S.obsCols ? ', tracé dans Observations' : ''}.`);
+  }
 }
 
 /* ---------- contrôle et enregistrement ---------- */
