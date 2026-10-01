@@ -321,6 +321,7 @@ const CONFIG = {
   // Vue par projet (colonnes facultatives de la table des projets/actions)
   colNatureProjet: ['Nature', 'Nature_Action', 'Type', 'Type_Action'],
   colGroupementProjet: ['Groupement_Porteur', 'Groupement_Pilote', 'Groupement'],
+  colSponsorProjet: ['Sponsor_CODIR', 'Sponsor_Codir', 'Sponsor', 'Sponsor_Direction'],  // à défaut : 1re colonne contenant « sponsor »
   // Rattachement aux stratégies : le lien est écrit dans Liste_Action_MEO, sur la ligne de nature PEPS ou AV du projet
   // (colonne Référence multiple vers chaque table de stratégie, détectée automatiquement). Les lignes de nature MEO ne sont jamais
   // modifiées. La colonne ID_Projet_Action des tables de stratégie est recalculée par sa formule.
@@ -377,7 +378,7 @@ const S = {
   view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', st: '', txt: '',
   selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: '', meta: null, refCache: {},
   flags: new Set(), pc: {}, refMissing: {}, qual: {},
-  pv: null, pvLoading: null, pvSel: null, pvScope: '', pvNat: '', pvGrp: '', pvTxt: '', pvNoLink: false, gotoRow: null, pvEdit: null, pvMsg: '', lnkPick: null
+  pv: null, pvLoading: null, pvSel: null, pvScope: '', pvNat: '', pvGrp: '', pvSpo: '', pvTxt: '', pvNoLink: false, gotoRow: null, pvEdit: null, pvMsg: '', lnkPick: null
 };
 
 /* ---------- stratégies disponibles ---------- */
@@ -1258,16 +1259,17 @@ async function loadProjetsTable(){
   const keys = Object.keys(raw).filter(k => k !== 'id' && k !== 'manualSort' && !k.startsWith('gristHelper'));
   const lab = resolveCol(keys, CONFIG.colLibelleProjet) || keys.find(k => raw[k].some(x => typeof x === 'string' && x.trim()));
   const c = {av: resolveCol(keys, CONFIG.colAvancementProjet), st: resolveCol(keys, CONFIG.colStatutProjet),
-             nat: resolveCol(keys, CONFIG.colNatureProjet), grp: resolveCol(keys, CONFIG.colGroupementProjet)};
+             nat: resolveCol(keys, CONFIG.colNatureProjet), grp: resolveCol(keys, CONFIG.colGroupementProjet),
+             spo: resolveCol(keys, CONFIG.colSponsorProjet) || keys.find(k => norm(k).includes('sponsor')) || null};
   const rs = {};
-  for (const k of ['st', 'nat', 'grp']) if (c[k]) rs[k] = await refResolver(t, c[k]);
+  for (const k of ['st', 'nat', 'grp', 'spo']) if (c[k]) rs[k] = await refResolver(t, c[k]);
   const val = (k, i) => { if (!c[k]) return ''; const v = raw[c[k]][i]; const x = rs[k] ? rs[k](v) : v;
     return isEmpty(x) ? '' : (Array.isArray(x) && x[0] === 'L' ? x.slice(1).join(', ') : String(x).trim()); };
   raw.id.forEach((id, i) => {
     const av = c.av ? raw[c.av][i] : null;
     out.set(t + ':' + id, {key: t + ':' + id, label: (lab ? String(raw[lab][i] ?? '').trim() : '') || '#' + id,
       pct: c.av && !isEmpty(av) && !isNaN(Number(av)) ? readPct(av) : null,
-      statut: val('st', i), nature: val('nat', i), groupement: val('grp', i), results: []});
+      statut: val('st', i), nature: val('nat', i), groupement: val('grp', i), sponsor: val('spo', i), results: []});
   });
   out.natCol = !!c.nat;
   return out;
@@ -1354,13 +1356,17 @@ const inScope = r => !S.pvScope || r.strat.id === S.pvScope;
 
 /* groupements d'un projet (valeur simple ou liste « A, B ») */
 const GRP_NONE = '__aucun__';
-const grpsOf = p => (p.groupement || '').split(',').map(g => g.trim()).filter(Boolean);
-const grpOk = p => !S.pvGrp || (S.pvGrp === GRP_NONE ? !grpsOf(p).length : grpsOf(p).includes(S.pvGrp));
+const splitVals = v => (v || '').split(',').map(g => g.trim()).filter(Boolean);
+const grpsOf = p => splitVals(p.groupement), sposOf = p => splitVals(p.sponsor);
+const multiOk = (sel, vals) => !sel || (sel === GRP_NONE ? !vals.length : vals.includes(sel));
+const grpOk = p => multiOk(S.pvGrp, grpsOf(p)), spoOk = p => multiOk(S.pvSpo, sposOf(p));
 function buildProjTools(){
   const natures = [...new Set([...S.pv.projets.values()].map(p => p.nature).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
   if (S.pvNat && !natures.includes(S.pvNat)) S.pvNat = '';
   const grps = [...new Set([...S.pv.projets.values()].flatMap(grpsOf))].sort((a, b) => a.localeCompare(b, 'fr', {numeric: true}));
   if (S.pvGrp && S.pvGrp !== GRP_NONE && !grps.includes(S.pvGrp)) S.pvGrp = '';
+  const spos = [...new Set([...S.pv.projets.values()].flatMap(sposOf))].sort((a, b) => a.localeCompare(b, 'fr', {numeric: true}));
+  if (S.pvSpo && S.pvSpo !== GRP_NONE && !spos.includes(S.pvSpo)) S.pvSpo = '';
   if (S.pvScope && !S.strategies.some(s => s.id === S.pvScope)) S.pvScope = '';
   $('#pTools').innerHTML = `
     <select id="pScope" aria-label="Stratégies prises en compte"><option value="">Toutes les stratégies</option>
@@ -1370,6 +1376,9 @@ function buildProjTools(){
     ${grps.length ? `<select id="pGrp" aria-label="Groupement"><option value="">Groupement : tous</option>
       ${grps.map(g => `<option value="${esc(g)}" ${g === S.pvGrp ? 'selected' : ''}>${esc(g)}</option>`).join('')}
       <option value="${GRP_NONE}" ${S.pvGrp === GRP_NONE ? 'selected' : ''}>Groupement non renseigné</option></select>` : ''}
+    ${spos.length ? `<select id="pSpo" aria-label="Sponsor CODIR"><option value="">Sponsor CODIR : tous</option>
+      ${spos.map(g => `<option value="${esc(g)}" ${g === S.pvSpo ? 'selected' : ''}>${esc(g)}</option>`).join('')}
+      <option value="${GRP_NONE}" ${S.pvSpo === GRP_NONE ? 'selected' : ''}>Sponsor non renseigné</option></select>` : ''}
     <input id="pTxt" type="search" placeholder="Rechercher un projet…" aria-label="Rechercher un projet" value="${esc(S.pvTxt)}">
     <button class="chip warn" id="pNoLink" aria-pressed="${S.pvNoLink}"></button>
     <span class="count" id="pCount"></span>`;
@@ -1512,7 +1521,7 @@ function renderProjets(){
   if (!$('#pScope')) buildProjTools();
   const q = norm(S.pvTxt);
   const all = [...S.pv.projets.values()].filter(p => !p.libre || p.results.length).map(p => ({p, res: p.results.filter(inScope)}));
-  const base = all.filter(x => (!S.pvNat || x.p.nature === S.pvNat) && grpOk(x.p) && (!q || norm(x.p.label + ' ' + x.p.groupement).includes(q)));
+  const base = all.filter(x => (!S.pvNat || x.p.nature === S.pvNat) && grpOk(x.p) && spoOk(x.p) && (!q || norm(x.p.label + ' ' + x.p.groupement).includes(q)));
   const sansLien = base.filter(x => !x.res.length && !x.p.libre && natureOk(x.p));
   const list = (S.pvNoLink ? sansLien : base)
     .sort((a, b) => (!a.res.length) - (!b.res.length) || a.p.label.localeCompare(b.p.label, 'fr', {numeric: true}));
@@ -1642,11 +1651,12 @@ $('#pBody').addEventListener('input', e => {
   if (e.target.id === 'pvAuteur'){ e.target.classList.remove('invalid'); $('#pvStatus').textContent = ''; }
 });
 $('#pTools').addEventListener('input', e => {
-  if (S.pvEdit && !confirmPv()){ e.target.value = e.target.id === 'pScope' ? S.pvScope : e.target.id === 'pNat' ? S.pvNat : e.target.id === 'pGrp' ? S.pvGrp : S.pvTxt; return; }
+  if (S.pvEdit && !confirmPv()){ e.target.value = e.target.id === 'pScope' ? S.pvScope : e.target.id === 'pNat' ? S.pvNat : e.target.id === 'pGrp' ? S.pvGrp : e.target.id === 'pSpo' ? S.pvSpo : S.pvTxt; return; }
   if (S.pvEdit){ S.pvEdit = null; S.dirty = false; }
   if (e.target.id === 'pScope') S.pvScope = e.target.value;
   if (e.target.id === 'pNat') S.pvNat = e.target.value;
   if (e.target.id === 'pGrp') S.pvGrp = e.target.value;
+  if (e.target.id === 'pSpo') S.pvSpo = e.target.value;
   if (e.target.id === 'pTxt') S.pvTxt = e.target.value;
   renderProjets();
 });
