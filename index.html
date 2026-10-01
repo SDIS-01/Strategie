@@ -377,7 +377,7 @@ const S = {
   view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', st: '', txt: '',
   selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: '', meta: null, refCache: {},
   flags: new Set(), pc: {}, refMissing: {}, qual: {},
-  pv: null, pvLoading: null, pvSel: null, pvScope: '', pvNat: '', pvTxt: '', pvNoLink: false, gotoRow: null, pvEdit: null, pvMsg: '', lnkPick: null
+  pv: null, pvLoading: null, pvSel: null, pvScope: '', pvNat: '', pvGrp: '', pvTxt: '', pvNoLink: false, gotoRow: null, pvEdit: null, pvMsg: '', lnkPick: null
 };
 
 /* ---------- stratégies disponibles ---------- */
@@ -1352,15 +1352,24 @@ function ensurePv(){
 }
 const inScope = r => !S.pvScope || r.strat.id === S.pvScope;
 
+/* groupements d'un projet (valeur simple ou liste « A, B ») */
+const GRP_NONE = '__aucun__';
+const grpsOf = p => (p.groupement || '').split(',').map(g => g.trim()).filter(Boolean);
+const grpOk = p => !S.pvGrp || (S.pvGrp === GRP_NONE ? !grpsOf(p).length : grpsOf(p).includes(S.pvGrp));
 function buildProjTools(){
   const natures = [...new Set([...S.pv.projets.values()].map(p => p.nature).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
   if (S.pvNat && !natures.includes(S.pvNat)) S.pvNat = '';
+  const grps = [...new Set([...S.pv.projets.values()].flatMap(grpsOf))].sort((a, b) => a.localeCompare(b, 'fr', {numeric: true}));
+  if (S.pvGrp && S.pvGrp !== GRP_NONE && !grps.includes(S.pvGrp)) S.pvGrp = '';
   if (S.pvScope && !S.strategies.some(s => s.id === S.pvScope)) S.pvScope = '';
   $('#pTools').innerHTML = `
     <select id="pScope" aria-label="Stratégies prises en compte"><option value="">Toutes les stratégies</option>
       ${S.strategies.map(s => `<option value="${esc(s.id)}" ${s.id === S.pvScope ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}</select>
     ${natures.length ? `<select id="pNat" aria-label="Nature"><option value="">Nature : toutes</option>
       ${natures.map(n => `<option value="${esc(n)}" ${n === S.pvNat ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}
+    ${grps.length ? `<select id="pGrp" aria-label="Groupement"><option value="">Groupement : tous</option>
+      ${grps.map(g => `<option value="${esc(g)}" ${g === S.pvGrp ? 'selected' : ''}>${esc(g)}</option>`).join('')}
+      <option value="${GRP_NONE}" ${S.pvGrp === GRP_NONE ? 'selected' : ''}>Groupement non renseigné</option></select>` : ''}
     <input id="pTxt" type="search" placeholder="Rechercher un projet…" aria-label="Rechercher un projet" value="${esc(S.pvTxt)}">
     <button class="chip warn" id="pNoLink" aria-pressed="${S.pvNoLink}"></button>
     <span class="count" id="pCount"></span>`;
@@ -1503,7 +1512,7 @@ function renderProjets(){
   if (!$('#pScope')) buildProjTools();
   const q = norm(S.pvTxt);
   const all = [...S.pv.projets.values()].filter(p => !p.libre || p.results.length).map(p => ({p, res: p.results.filter(inScope)}));
-  const base = all.filter(x => (!S.pvNat || x.p.nature === S.pvNat) && (!q || norm(x.p.label + ' ' + x.p.groupement).includes(q)));
+  const base = all.filter(x => (!S.pvNat || x.p.nature === S.pvNat) && grpOk(x.p) && (!q || norm(x.p.label + ' ' + x.p.groupement).includes(q)));
   const sansLien = base.filter(x => !x.res.length && !x.p.libre && natureOk(x.p));
   const list = (S.pvNoLink ? sansLien : base)
     .sort((a, b) => (!a.res.length) - (!b.res.length) || a.p.label.localeCompare(b.p.label, 'fr', {numeric: true}));
@@ -1633,10 +1642,11 @@ $('#pBody').addEventListener('input', e => {
   if (e.target.id === 'pvAuteur'){ e.target.classList.remove('invalid'); $('#pvStatus').textContent = ''; }
 });
 $('#pTools').addEventListener('input', e => {
-  if (S.pvEdit && !confirmPv()){ e.target.value = e.target.id === 'pScope' ? S.pvScope : e.target.id === 'pNat' ? S.pvNat : S.pvTxt; return; }
+  if (S.pvEdit && !confirmPv()){ e.target.value = e.target.id === 'pScope' ? S.pvScope : e.target.id === 'pNat' ? S.pvNat : e.target.id === 'pGrp' ? S.pvGrp : S.pvTxt; return; }
   if (S.pvEdit){ S.pvEdit = null; S.dirty = false; }
   if (e.target.id === 'pScope') S.pvScope = e.target.value;
   if (e.target.id === 'pNat') S.pvNat = e.target.value;
+  if (e.target.id === 'pGrp') S.pvGrp = e.target.value;
   if (e.target.id === 'pTxt') S.pvTxt = e.target.value;
   renderProjets();
 });
