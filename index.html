@@ -306,10 +306,12 @@ const CONFIG = {
   // Vue par projet (colonnes facultatives de la table des projets/actions)
   colNatureProjet: ['Nature', 'Nature_Action', 'Type', 'Type_Action'],
   colGroupementProjet: ['Groupement_Porteur', 'Groupement_Pilote', 'Groupement'],
-  // Rattachement aux stratégies : le lien est porté par les actions MEO (colonne Référence multiple vers chaque table de stratégie,
-  // détectée automatiquement). La colonne ID_Projet_Action des tables de stratégie est recalculée par sa formule.
+  // Rattachement aux stratégies : le lien est écrit dans Liste_Action_MEO, sur la ligne de nature PEPS ou AV du projet
+  // (colonne Référence multiple vers chaque table de stratégie, détectée automatiquement). Les lignes de nature MEO ne sont jamais
+  // modifiées. La colonne ID_Projet_Action des tables de stratégie est recalculée par sa formule.
   tableMEO: 'Liste_Action_MEO',
   colProjetMEO: ['ID_Projet_Action_AV'],
+  colNatureMEO: ['Nature'],
   colLibelleMEO: ['ID_Action_MEO', 'Libelle_Action', 'Libelle', 'Intitule', 'Action', 'Nom', 'Titre'],
   naturesRattachables: ['PEPS', 'AV'],
   // Préparation de la prochaine stratégie (colonnes facultatives)
@@ -1157,14 +1159,19 @@ async function loadMeo(){
   const lk = keys.filter(k => k !== 'id' && k !== 'manualSort' && !k.startsWith('gristHelper'));
   const lab = resolveCol(lk, CONFIG.colLibelleMEO) || lk.find(k => k !== projCol && raw[k].some(v => typeof v === 'string' && v.trim()));
   const labRes = lab ? await refResolver(tid, lab) : null;
+  const natCol = resolveCol(keys, CONFIG.colNatureMEO), natRes = natCol ? await refResolver(tid, natCol) : null;
+  const natOf = i => { if (!natCol) return ''; const v = natRes ? natRes(raw[natCol][i]) : raw[natCol][i];
+    return Array.isArray(v) && v[0] === 'L' ? v.slice(1).join(', ') : String(v ?? '').trim(); };
   const ids = v => Array.isArray(v) && v[0] === 'L' ? v.slice(1).filter(x => typeof x === 'number' && x > 0) : [];
   const allCols = {...stratCols, ...roStrat};
   const actions = raw.id.map((id, i) => {
     const l = lab ? (labRes ? labRes(raw[lab][i]) : raw[lab][i]) : '';
-    return {id, label: String(l ?? '').trim() || 'Action #' + id, proj: raw[projCol][i],
+    const nature = natOf(i);
+    return {id, label: String(l ?? '').trim() || 'Ligne #' + id, proj: raw[projCol][i], nature,
+      ok: CONFIG.naturesRattachables.some(n => norm(nature) === norm(n)),
       links: Object.fromEntries(Object.entries(allCols).map(([sid, c]) => [sid, ids(raw[c][i])]))};
   });
-  return {table: tid, projCol, stratCols, roStrat, actions};
+  return {table: tid, projCol, natCol, stratCols, roStrat, actions};
 }
 async function loadStratRows(s){
   const raw = await grist.docApi.fetchTable(s.id), keys = Object.keys(raw), col = {}, rs = {};
@@ -1230,15 +1237,18 @@ function buildProjTools(){
 
 /* ---------- rattachement projet ↔ résultats attendus (écriture dans Liste_Action_MEO) ---------- */
 const projRowId = p => p && p.key.startsWith(CONFIG.tableProjets + ':') ? +p.key.slice(CONFIG.tableProjets.length + 1) : null;
-const meoOf = p => { const id = projRowId(p); return id && S.pv.meo ? S.pv.meo.actions.filter(a => a.proj === id) : []; };
+const lignesProj = p => { const id = projRowId(p); return id && S.pv.meo ? S.pv.meo.actions.filter(a => a.proj === id) : []; };
+const meoOf = p => lignesProj(p).filter(a => a.ok);  // lignes PEPS/AV du projet, seules modifiables
 const viaMeo = (p, sid, rid) => meoOf(p).filter(a => (a.links[sid] || []).includes(rid));
+const viaAutre = (p, sid, rid) => lignesProj(p).filter(a => !a.ok && (a.links[sid] || []).includes(rid));
 const natureOk = p => !S.pv.projets.natCol || CONFIG.naturesRattachables.some(n => norm(p.nature) === norm(n));
 function rattachInfo(p){
   if (!projRowId(p)) return {ok: false, why: `Projet absent de ${CONFIG.tableProjets} : rattachement impossible depuis le widget.`};
   if (!natureOk(p)) return {ok: false, why: `Nature « ${p.nature || 'non renseignée'} » : seuls les projets ${CONFIG.naturesRattachables.join(' et ')} sont rattachés aux stratégies.`};
   if (!S.pv.meo) return {ok: false, why: `Table ${CONFIG.tableMEO} introuvable ou sans colonne de référence vers ${CONFIG.tableProjets} : rattachement impossible.`};
+  if (!S.pv.meo.natCol) return {ok: false, why: `Colonne ${CONFIG.colNatureMEO[0]} introuvable dans ${S.pv.meo.table} : rattachement impossible.`};
   if (!Object.keys(S.pv.meo.stratCols).length) return {ok: false, why: `Aucune colonne de ${S.pv.meo.table} ne pointe vers une table de stratégie en saisie libre : rattachement impossible.`};
-  if (!meoOf(p).length) return {ok: false, why: `Ce projet n'a aucune action MEO. Créez-en une dans ${S.pv.meo.table} pour pouvoir le rattacher.`};
+  if (!meoOf(p).length) return {ok: false, why: `Aucune ligne de nature ${CONFIG.naturesRattachables.join(' ou ')} pour ce projet dans ${S.pv.meo.table} : rattachement impossible.`};
   return {ok: true};
 }
 const pvChanges = () => S.pvEdit ? S.pvEdit.draft.size : 0;
@@ -1250,15 +1260,16 @@ function pvCounts(){
 }
 function panelRow(p, sid, r){
   const k = sid + '|' + r.id, d = S.pvEdit.draft.get(k), via = viaMeo(p, sid, r.id), on = d ? d.on : via.length > 0, acts = meoOf(p);
+  const horsPA = !via.length && !d && viaAutre(p, sid, r.id).length > 0;  // lien porté par une ligne d'une autre nature : non modifiable
   let right = '<span></span>';
-  if (d && d.on) right = acts.length > 1
-    ? `<select data-meo="${esc(k)}" aria-label="Action MEO portant le lien">${acts.map(a => `<option value="${a.id}" ${a.id === d.meo ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}</select>`
-    : `<span class="via">via ${esc(acts[0].label)}</span>`;
-  else if (d) right = `<span class="via del">retiré de ${via.length > 1 ? via.length + ' actions MEO' : esc(via[0].label)}</span>`;
-  else if (via.length) right = `<span class="via">via ${via.map(a => esc(a.label)).join(', ')}</span>`;
+  if (d && d.on && acts.length > 1)
+    right = `<select data-meo="${esc(k)}" aria-label="Ligne PEPS/AV portant le lien">${acts.map(a => `<option value="${a.id}" ${a.id === d.meo ? 'selected' : ''}>${esc(a.label)} (${esc(a.nature)})</option>`).join('')}</select>`;
+  else if (d && d.on) right = '<span class="via">à rattacher</span>';
+  else if (d) right = '<span class="via del">à détacher</span>';
+  else if (horsPA) right = `<span class="via">lien porté par une ligne ${esc(viaAutre(p, sid, r.id)[0].nature || 'hors PEPS/AV')}, non modifiable ici</span>`;
   const id = 'ck-' + sid + '-' + r.id;
   return `<div class="ck ${d ? (d.on ? 'add' : 'rem') : ''}" data-row="${esc(k)}" data-q="${esc(norm(r.resultat + ' ' + r.objectif))}">
-    <input type="checkbox" id="${esc(id)}" data-pk="${esc(k)}" ${on ? 'checked' : ''}>
+    <input type="checkbox" id="${esc(id)}" data-pk="${esc(k)}" ${on || horsPA ? 'checked' : ''} ${horsPA ? 'disabled' : ''}>
     <label for="${esc(id)}"><b>${esc(r.code || '—')}</b><span>${esc(r.resultat.replace(/^\s*[\d.]+\s*/, ''))}</span></label>${prioBadge(r.priorite)}${right}</div>`;
 }
 function panelHtml(p){
@@ -1271,12 +1282,10 @@ function panelHtml(p){
   if (ro) list = `<div class="note">La colonne ${esc(meo.roStrat[sid])} de ${esc(meo.table)} est calculée par formule : rattachement impossible pour cette stratégie.</div>`;
   else for (const [obj, oRows] of groupBy(rows, r => r.objectif))
     list += `<div class="ckg"><div class="sobj"><span>${esc(obj)}</span><span></span></div>${oRows.map(r => panelRow(p, sid, r)).join('')}</div>`;
-  const nAct = meoOf(p).length;
   return `<div class="edp">
     <div class="etools">
       ${strats.map(s => `<button class="chip" data-pvstrat="${esc(s.id)}" aria-pressed="${s.id === sid}">${esc(s.label)}</button>`).join('')}
       <input type="search" id="pvQ" placeholder="Rechercher un résultat…" aria-label="Rechercher un résultat" value="${esc(E.q)}">
-      <span class="count">${nAct} action${nAct > 1 ? 's' : ''} MEO dans ce projet</span>
     </div>
     <div class="elist">${list || '<div class="empty">Aucun résultat attendu dans cette stratégie.</div>'}</div>
     <div class="efoot">
@@ -1318,10 +1327,10 @@ async function pvSave(auteurForce){
     if (!meo.stratCols[sid]) continue;
     if (d.on){
       const a = meoOf(p).find(x => x.id === d.meo) || meoOf(p)[0]; setOf(a, sid).add(rid);
-      obs.push([sid, r, `Projet « ${p.label} » rattaché à ce résultat via l'action MEO « ${a.label} » (widget de pilotage).`]);
+      obs.push([sid, r, `Projet « ${p.label} » rattaché à ce résultat (widget de pilotage).`]);
     } else {
       const via = viaMeo(p, sid, rid); via.forEach(a => setOf(a, sid).delete(rid));
-      obs.push([sid, r, `Projet « ${p.label} » détaché de ce résultat (action${via.length > 1 ? 's' : ''} MEO : ${via.map(a => a.label).join(', ')}) (widget de pilotage).`]);
+      obs.push([sid, r, `Projet « ${p.label} » détaché de ce résultat (widget de pilotage).`]);
     }
   }
   const actions = [...fin.values()].map(f => ['UpdateRecord', meo.table, f.a.id, {[f.col]: ['L', ...[...f.ids].sort((x, y) => x - y)]}]);
@@ -1344,8 +1353,8 @@ async function pvSave(auteurForce){
   return true;
 }
 async function pvDetach(sid, rid){
-  const p = S.pv.projets.get(S.pvSel), r = S.pv.results.find(x => x.strat.id === sid && x.id === rid), via = viaMeo(p, sid, rid);
-  if (!confirm(`Détacher le résultat ${r.code || ''} du projet « ${p.label} » ?\n\nIl sera retiré de l'action${via.length > 1 ? 's' : ''} MEO : ${via.map(a => a.label).join(', ')}.`)) return;
+  const p = S.pv.projets.get(S.pvSel), r = S.pv.results.find(x => x.strat.id === sid && x.id === rid);
+  if (!confirm(`Détacher le résultat ${r.code || ''} du projet « ${p.label} » ?`)) return;
   let auteur = S.auteur;
   if (S.obsCols && !auteur){ auteur = (prompt('Votre nom, pour la traçabilité dans Observations :') || '').trim(); if (!auteur) return; }
   S.pvEdit = {key: p.key, strat: sid, q: '', draft: new Map([[sid + '|' + rid, {on: false}]])};
@@ -1413,7 +1422,7 @@ function renderProjets(){
           const via = viaMeo(p, s.id, r.id), canDel = info.ok && via.length && S.pv.meo.stratCols[s.id];
           html += `<div class="pres">
           <button class="pgo" data-goto="${esc(s.id)}|${r.id}" title="Voir dans l'onglet Pilotage"><b>${esc(r.code || '—')}</b>
-            <span>${esc(r.resultat.replace(/^\s*[\d.]+\s*/, ''))}${via.length ? `<small class="via">via ${via.map(a => esc(a.label)).join(', ')}</small>` : ''}</span></button>
+            <span>${esc(r.resultat.replace(/^\s*[\d.]+\s*/, ''))}</span></button>
           ${prioBadge(r.priorite)}
           <span class="prog" style="--c:${ST_COLOR[r.statut]}">${stBadge(r.statut)}<span class="pb"><i style="width:${r.pct}%"></i></span><b>${pctTxt(r.pct)}</b></span>
           ${canDel ? `<button class="pdel" data-detach="${esc(s.id)}|${r.id}" aria-label="Détacher le résultat ${esc(r.code)} de ce projet" title="Détacher de ce projet">×</button>` : '<span></span>'}</div>`; });
