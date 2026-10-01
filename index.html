@@ -173,6 +173,35 @@ textarea{min-height:70px;resize:vertical}
 .tag.flag.pro{background:var(--accent-soft);border-color:#c9d6e6;color:var(--accent)}
 .reform{margin-top:4px;padding-left:8px;border-left:2px solid var(--p2);color:var(--muted);font-style:italic}
 label.f[hidden]{display:none}
+
+/* Vue par projet */
+.filters[hidden],.refresh[hidden],.strat[hidden]{display:none}
+.pv-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.pv-tools select,.pv-tools input[type=search]{border:1px solid var(--line);border-radius:6px;padding:4px 6px;background:#fff;max-width:240px}
+.chip.warn[aria-pressed="true"]{background:var(--p2);border-color:var(--p2);color:#fff}
+.pv{display:grid;grid-template-columns:minmax(220px,300px) minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:760px){.pv{grid-template-columns:1fr}}
+.pitem{display:block;width:100%;text-align:left;border:0;border-top:1px solid var(--line);background:#fff;padding:7px 10px;cursor:pointer}
+.pitem:first-child{border-top:0}
+.pitem small{display:block;color:var(--muted)}
+.pitem[aria-current="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 var(--accent)}
+.pitem.nolink,.pitem.nolink small{color:var(--p2)}
+.phead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:12px 14px;border-bottom:1px solid var(--line)}
+.phead h3{margin:0 0 4px;font-size:15px}
+.phead .prog{min-width:150px}
+.pv .kpis{padding:12px 12px 0;margin-bottom:0}
+.pres{display:grid;grid-template-columns:48px minmax(0,1fr) 90px 150px;gap:10px;align-items:center;width:100%;text-align:left;border:0;border-top:1px solid var(--line);background:#fff;padding:7px 12px;cursor:pointer}
+.pres:hover{background:#fbfaf7}
+.pres b{color:var(--accent)}
+@media (max-width:760px){.pres{grid-template-columns:44px minmax(0,1fr)}.pres .badge,.pres .prog{grid-column:2}}
+.psec{padding:10px 12px 12px;border-top:1px solid var(--line)}
+.psec h4{margin:0 0 8px;font-size:13px;color:var(--accent)}
+.psec .tags{display:flex;flex-wrap:wrap;gap:6px}
+.psec button.tag{cursor:pointer;padding:2px 8px}
+.psec button.tag:hover{border-color:var(--accent)}
+.row.flash{animation:flash 2.5s ease-out}
+@keyframes flash{from{background:var(--accent-soft)}to{background:transparent}}
+@media (prefers-reduced-motion:reduce){.row.flash{animation:none;background:var(--accent-soft)}}
 </style>
 </head>
 <body>
@@ -183,6 +212,7 @@ label.f[hidden]{display:none}
       <button class="tab" role="tab" data-view="pilotage" aria-selected="true">Pilotage</button>
       <button class="tab" role="tab" data-view="matrice" aria-selected="false">Matrice priorité × facilité</button>
       <button class="tab" role="tab" data-view="saisie" aria-selected="false">Saisie</button>
+      <button class="tab" role="tab" data-view="projets" aria-selected="false">Par projet</button>
     </nav>
     <button class="refresh" id="refresh" title="Relire les données">Actualiser</button>
     <button class="refresh" id="expBtn" title="Exporter la stratégie affichée, filtres compris">Exporter en PDF</button>
@@ -210,6 +240,7 @@ label.f[hidden]{display:none}
   <section class="view active" id="v-pilotage"></section>
   <section class="view" id="v-matrice"></section>
   <section class="view" id="v-saisie"></section>
+  <section class="view" id="v-projets"><div class="pv-tools" id="pTools"></div><div id="pBody"></div></section>
 </main>
 
 <script>
@@ -245,6 +276,9 @@ const CONFIG = {
   // Avancement et statut des projets/actions liés (lus tels que calculés dans Grist)
   colAvancementProjet: ['Avancement', 'Taux_Avancement', 'Avancement_Projet'],
   colStatutProjet: ['Statut', 'Etat', 'Etat_Avancement'],
+  // Vue par projet (colonnes facultatives de la table des projets/actions)
+  colNatureProjet: ['Nature', 'Nature_Action', 'Type', 'Type_Action'],
+  colGroupementProjet: ['Groupement_Porteur', 'Groupement_Pilote', 'Groupement'],
   // Préparation de la prochaine stratégie (colonnes facultatives)
   colsProchain: {aReformuler: ['A_reformuler'], aProposer: ['A_proposer_prochain'], reformulation: ['Reformulation_proposee']}
 };
@@ -292,7 +326,8 @@ const S = {
   strategies: [], strat: null, colIds: {}, rows: [], refLabels: {}, attached: null,
   view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', st: '', txt: '',
   selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: '', meta: null, refCache: {},
-  flags: new Set(), pc: {}, refMissing: {}, qual: {}
+  flags: new Set(), pc: {}, refMissing: {}, qual: {},
+  pv: null, pvLoading: null, pvSel: null, pvScope: '', pvNat: '', pvTxt: '', pvNoLink: false, gotoRow: null
 };
 
 /* ---------- stratégies disponibles ---------- */
@@ -435,6 +470,7 @@ async function loadRefTables(tables){
 /* ---------- chargement ---------- */
 async function load(){
   const banner = $('#banner');
+  S.pv = null; S.pvLoading = null;
   try {
     S.strategies = await listStrategies();
     if (!S.strategies.length){
@@ -614,6 +650,7 @@ function render(){
   if (S.view === 'pilotage') renderPilotage(rows);
   if (S.view === 'matrice') renderMatrice(rows);
   if (S.view === 'saisie') renderSaisie(rows);
+  if (S.view === 'projets') renderProjets();
 }
 const prioBadge = p => p ? `<span class="badge ${p}">${p}</span>` : `<span class="badge nd">Sans priorité</span>`;
 const ST_TEXT = {'À engager': '#7a2e24', 'En cours': '#4a3508', 'Réalisé': '#fff', 'Abandonné': '#fff'};
@@ -684,7 +721,7 @@ function renderPilotage(rows){
       html += `<div class="sobj"><span>${esc(so)}</span>${miniBar(sRows)}</div>`;
       sRows.forEach(r => {
         const open = S.openLinks.has(r.id);
-        html += `<div class="row">
+        html += `<div class="row" id="r-${r.id}">
           <div><div class="title" data-edit="${r.id}" title="Ouvrir la saisie">${esc(r.resultat)}</div>
             <div class="meta">${prioBadge(r.priorite)}${flagTags(r)}${r.facile ? `<span class="tag">Facile : ${r.facile.toLowerCase()}</span>` : ''}
               ${r.groupement ? `<span class="tag">${esc(r.groupement)}</span>` : ''}
@@ -1045,6 +1082,174 @@ async function runExport(){
 }
 $('#expBtn').addEventListener('click', runExport);
 
+/* =========================================================
+   VUE PAR PROJET : lecture inversée des liens résultat attendu → projet/action,
+   sur toutes les stratégies à la fois
+   ========================================================= */
+async function loadProjetsTable(){
+  const t = CONFIG.tableProjets, out = new Map();
+  let raw; try { raw = await grist.docApi.fetchTable(t); } catch(e){ return out; }
+  const keys = Object.keys(raw).filter(k => k !== 'id' && k !== 'manualSort' && !k.startsWith('gristHelper'));
+  const lab = resolveCol(keys, CONFIG.colLibelleProjet) || keys.find(k => raw[k].some(x => typeof x === 'string' && x.trim()));
+  const c = {av: resolveCol(keys, CONFIG.colAvancementProjet), st: resolveCol(keys, CONFIG.colStatutProjet),
+             nat: resolveCol(keys, CONFIG.colNatureProjet), grp: resolveCol(keys, CONFIG.colGroupementProjet)};
+  const rs = {};
+  for (const k of ['st', 'nat', 'grp']) if (c[k]) rs[k] = await refResolver(t, c[k]);
+  const val = (k, i) => { if (!c[k]) return ''; const v = raw[c[k]][i]; const x = rs[k] ? rs[k](v) : v;
+    return isEmpty(x) ? '' : (Array.isArray(x) && x[0] === 'L' ? x.slice(1).join(', ') : String(x).trim()); };
+  raw.id.forEach((id, i) => {
+    const av = c.av ? raw[c.av][i] : null;
+    out.set(t + ':' + id, {key: t + ':' + id, label: (lab ? String(raw[lab][i] ?? '').trim() : '') || '#' + id,
+      pct: c.av && !isEmpty(av) && !isNaN(Number(av)) ? readPct(av) : null,
+      statut: val('st', i), nature: val('nat', i), groupement: val('grp', i), results: []});
+  });
+  return out;
+}
+async function loadStratRows(s){
+  const raw = await grist.docApi.fetchTable(s.id), keys = Object.keys(raw), col = {}, rs = {};
+  for (const k of ['objectif', 'sousObjectif', 'resultat', 'priorite', 'avancement', 'statut', 'liens']) col[k] = resolveCol(keys, CONFIG.cols[k]);
+  for (const k of ['objectif', 'sousObjectif', 'resultat', 'priorite']) if (col[k]) rs[k] = await refResolver(s.id, col[k]);
+  const get = (k, i) => { if (!col[k]) return null; const v = raw[col[k]][i]; return rs[k] ? rs[k](v) : v; };
+  return raw.id.map((id, i) => {
+    const refs = []; collectRefs(get('liens', i), refs);
+    const resultat = String(get('resultat', i) ?? ''), pct = readPct(get('avancement', i));
+    return {strat: s, id, resultat, code: codeOf(resultat), refs, pct,
+      statut: norm(get('statut', i) ?? '') === 'abandonne' ? 'Abandonné' : statutAuto(pct),
+      objectif: String(get('objectif', i) ?? '') || 'Sans orientation', priorite: normPrio(get('priorite', i))};
+  });
+}
+async function buildPv(){
+  const projets = await loadProjetsTable();
+  const byLabel = new Map(); projets.forEach(p => { const k = norm(p.label); if (k && !byLabel.has(k)) byLabel.set(k, p.key); });
+  const results = [], errors = [];
+  for (const s of S.strategies){
+    let rows; try { rows = await loadStratRows(s); } catch(e){ errors.push(s.label); continue; }
+    for (const r of rows){
+      const keys = new Set();
+      for (const ref of r.refs){
+        let key;
+        if (ref.id){
+          const t = ref.t || CONFIG.tableProjets; key = t + ':' + ref.id;
+          if (!projets.has(key)){ // référence vers une autre table : libellé, avancement et statut génériques
+            await loadRefTables([t]); const it = (S.refLabels[t] || {})[ref.id] || {label: '#' + ref.id, pct: null, statut: ''};
+            projets.set(key, {key, label: it.label, pct: it.pct, statut: it.statut, nature: '', groupement: '', results: []});
+          }
+        } else {
+          key = byLabel.get(norm(ref.label)) || 'txt:' + norm(ref.label);
+          if (!projets.has(key)) projets.set(key, {key, label: ref.label, pct: undefined, statut: '', nature: '', groupement: '', libre: true, results: []});
+        }
+        keys.add(key);
+      }
+      r.projets = [...keys]; keys.forEach(k => projets.get(k).results.push(r)); results.push(r);
+    }
+  }
+  return {projets, results, errors};
+}
+function ensurePv(){
+  if (S.pv) return Promise.resolve(S.pv);
+  if (!S.pvLoading) S.pvLoading = buildPv().then(pv => { S.pv = pv; return pv; }).catch(e => { S.pvLoading = null; throw e; });
+  return S.pvLoading;
+}
+const inScope = r => !S.pvScope || r.strat.id === S.pvScope;
+
+function buildProjTools(){
+  const natures = [...new Set([...S.pv.projets.values()].map(p => p.nature).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
+  if (S.pvNat && !natures.includes(S.pvNat)) S.pvNat = '';
+  if (S.pvScope && !S.strategies.some(s => s.id === S.pvScope)) S.pvScope = '';
+  $('#pTools').innerHTML = `
+    <select id="pScope" aria-label="Stratégies prises en compte"><option value="">Toutes les stratégies</option>
+      ${S.strategies.map(s => `<option value="${esc(s.id)}" ${s.id === S.pvScope ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}</select>
+    ${natures.length ? `<select id="pNat" aria-label="Nature"><option value="">Nature : toutes</option>
+      ${natures.map(n => `<option value="${esc(n)}" ${n === S.pvNat ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}
+    <input id="pTxt" type="search" placeholder="Rechercher un projet…" aria-label="Rechercher un projet" value="${esc(S.pvTxt)}">
+    <button class="chip warn" id="pNoLink" aria-pressed="${S.pvNoLink}"></button>
+    <span class="count" id="pCount"></span>`;
+}
+
+function renderProjets(){
+  const body = $('#pBody');
+  if (!S.pv){
+    body.innerHTML = '<div class="empty">Chargement des projets et des liens de toutes les stratégies…</div>';
+    ensurePv().then(() => { buildProjTools(); if (S.view === 'projets') renderProjets(); })
+      .catch(e => { body.innerHTML = `<div class="banner">Lecture impossible : ${esc(e.message || e)}.</div>`; });
+    return;
+  }
+  if (!$('#pScope')) buildProjTools();
+  const q = norm(S.pvTxt);
+  const all = [...S.pv.projets.values()].filter(p => !p.libre || p.results.length).map(p => ({p, res: p.results.filter(inScope)}));
+  const base = all.filter(x => (!S.pvNat || x.p.nature === S.pvNat) && (!q || norm(x.p.label + ' ' + x.p.groupement).includes(q)));
+  const sansLien = base.filter(x => !x.res.length && !x.p.libre);
+  const list = (S.pvNoLink ? sansLien : base)
+    .sort((a, b) => (!a.res.length) - (!b.res.length) || a.p.label.localeCompare(b.p.label, 'fr', {numeric: true}));
+  $('#pNoLink').textContent = `Sans lien stratégique (${sansLien.length})`;
+  $('#pNoLink').setAttribute('aria-pressed', S.pvNoLink);
+  $('#pCount').textContent = `${list.length} projet${list.length > 1 ? 's' : ''}/action${list.length > 1 ? 's' : ''}`;
+  const warn = S.pv.errors.length ? `<div class="banner info">Tables non lues : ${S.pv.errors.map(esc).join(', ')}.</div>` : '';
+  if (!list.length){ body.innerHTML = warn + '<div class="empty">Aucun projet ou action ne correspond. Modifiez la recherche ou les filtres.</div>'; return; }
+  if (!list.some(x => x.p.key === S.pvSel)) S.pvSel = list[0].p.key;
+
+  const nStrat = res => new Set(res.map(r => r.strat.id)).size;
+  const item = ({p, res}) => `<button class="pitem ${res.length || p.libre ? '' : 'nolink'}" data-proj="${esc(p.key)}" aria-current="${p.key === S.pvSel}">
+      ${esc(p.label)}<small>${res.length ? `${res.length} résultat${res.length > 1 ? 's' : ''} attendu${res.length > 1 ? 's' : ''}, ${nStrat(res)} stratégie${nStrat(res) > 1 ? 's' : ''}` : 'Aucun lien stratégique'}${p.libre ? ', saisi en texte libre' : ''}</small></button>`;
+
+  const cur = list.find(x => x.p.key === S.pvSel), p = cur.p, res = cur.res;
+  const lien = {label: p.label, pct: p.pct, statut: p.statut};
+  const col = p.pct === undefined ? null : lienColor(lien);
+  const stProj = p.statut || (typeof p.pct === 'number' ? statutAuto(p.pct) : '');
+  const meta = [p.nature, p.groupement].filter(Boolean).map(esc).join(', ');
+  let html = `<div class="panel"><div class="phead"><div><h3>${esc(p.label)}</h3>
+      <div class="meta">${meta ? `<span>${meta}</span>` : ''}${p.libre ? '<span class="tag">Lien saisi en texte libre, projet non retrouvé dans ' + esc(CONFIG.tableProjets) + '</span>' : ''}</div></div>
+    ${p.pct === undefined ? '' : `<div class="prog" style="--c:${col || 'var(--muted)'}">
+      ${stProj ? (col ? `<span class="st" style="--c:${col};color:${lienText(lien)}">${esc(stProj)}</span>` : `<span class="st neutre">${esc(stProj)}</span>`) : ''}
+      ${typeof p.pct === 'number' ? `<span class="pb"><i style="width:${p.pct}%"></i></span><b>${pctTxt(p.pct)} d'avancement projet</b>` : '<span class="status">Avancement non renseigné</span>'}</div>`}</div>`;
+
+  if (!res.length){
+    html += `<div class="empty">Ce projet n'est rattaché à aucun résultat attendu${S.pvScope ? ' dans cette stratégie' : ''}. Le rattachement se fait dans la colonne ${esc(CONFIG.cols.liens[0])} des tables de stratégie.</div></div>`;
+  } else {
+    const a = aggregate(res), nP1 = res.filter(r => r.priorite === 'P1').length;
+    html += `<div class="kpis">
+      <div class="kpi"><b>${res.length}</b><span>résultat${res.length > 1 ? 's' : ''} attendu${res.length > 1 ? 's' : ''} servi${res.length > 1 ? 's' : ''}, ${nStrat(res)} stratégie${nStrat(res) > 1 ? 's' : ''}</span></div>
+      <div class="kpi"><b>${nP1}</b><span>en priorité P1</span></div>
+      <div class="kpi"><b>${pctTxt(a.taux)}</b><span>réalisation moyenne de ces résultats${a.byS['Abandonné'] ? ', abandonnés exclus' : ''}</span></div></div>
+      <div style="padding:12px"><div class="panel">`;
+    for (const s of S.strategies){
+      const sRes = res.filter(r => r.strat.id === s.id); if (!sRes.length) continue;
+      html += `<div class="obj"><span>${esc(s.label)}</span>${miniBar(sRes)}</div>`;
+      for (const [obj, oRes] of groupBy(sRes.sort((x, y) => natCmp(x.code || '999', y.code || '999')), r => r.objectif)){
+        html += `<div class="sobj"><span>${esc(obj)}</span>${miniBar(oRes)}</div>`;
+        oRes.forEach(r => { html += `<button class="pres" data-goto="${esc(s.id)}|${r.id}" title="Voir dans l'onglet Pilotage">
+          <b>${esc(r.code || '—')}</b><span>${esc(r.resultat.replace(/^\s*[\d.]+\s*/, ''))}</span>${prioBadge(r.priorite)}
+          <span class="prog" style="--c:${ST_COLOR[r.statut]}">${stBadge(r.statut)}<span class="pb"><i style="width:${r.pct}%"></i></span><b>${pctTxt(r.pct)}</b></span></button>`; });
+      }
+    }
+    html += `</div></div>`;
+    // autres projets servant les mêmes résultats
+    const co = new Map();
+    res.forEach(r => r.projets.forEach(k => { if (k !== p.key) co.set(k, (co.get(k) || 0) + 1); }));
+    html += `<div class="psec"><h4>Autres projets/actions contribuant aux mêmes résultats</h4>${co.size
+      ? `<div class="tags">${[...co].sort((x, y) => y[1] - x[1] || S.pv.projets.get(x[0]).label.localeCompare(S.pv.projets.get(y[0]).label, 'fr'))
+          .map(([k, n]) => `<button class="tag" data-proj="${esc(k)}" title="Afficher ce projet">${esc(S.pv.projets.get(k).label)} (${n} résultat${n > 1 ? 's' : ''} en commun)</button>`).join('')}</div>`
+      : '<p class="status">Aucun : ce projet est le seul à servir ces résultats.</p>'}</div></div>`;
+  }
+  body.innerHTML = warn + `<div class="pv"><div class="panel list" role="list" aria-label="Projets et actions">${list.map(item).join('')}</div>${html}</div>`;
+}
+
+/* clic sur un résultat : ouverture de l'onglet Pilotage sur la bonne stratégie, filtres levés, ligne mise en évidence */
+async function gotoResult(stratId, rowId){
+  S.prios.clear(); S.flags.clear(); S.grp = S.obj = S.fac = S.st = S.txt = '';
+  document.querySelectorAll('.chip[data-prio],.chip[data-flag]').forEach(c => c.setAttribute('aria-pressed', 'false'));
+  $('#fGrp').value = $('#fObj').value = $('#fFac').value = $('#fSt').value = $('#fTxt').value = '';
+  S.openLinks.add(rowId); S.selectedId = rowId;
+  if (S.strat.id !== stratId){
+    S.strat = S.strategies.find(s => s.id === stratId); S.openLinks = new Set([rowId]);
+    try { await grist.setOption('strategie', S.strat.id); } catch(e){}
+    S.view = 'pilotage'; await load(); S.selectedId = rowId;
+  }
+  setView('pilotage');
+  const el = document.getElementById('r-' + rowId);
+  if (el){ el.scrollIntoView({block: 'center'}); el.classList.add('flash'); }
+}
+
 /* ---------- navigation ---------- */
 const confirmLeave = () => !S.dirty || confirm('Des modifications ne sont pas enregistrées. Les abandonner ?');
 function setView(v){
@@ -1052,6 +1257,8 @@ function setView(v){
   S.view = v; S.dirty = false;
   document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.view === v));
   document.querySelectorAll('.view').forEach(s => s.classList.toggle('active', s.id === 'v-' + v));
+  // la vue par projet a ses propres filtres et couvre toutes les stratégies
+  $('.filters').hidden = v === 'projets'; $('#expBtn').hidden = v === 'projets'; $('#strat').hidden = v === 'projets';
   render();
 }
 function selectRow(id, openEdit){
@@ -1081,6 +1288,12 @@ $('#fObj').addEventListener('change', e => { S.obj = e.target.value; render(); }
 $('#fFac').addEventListener('change', e => { S.fac = e.target.value; render(); });
 $('#fSt').addEventListener('change', e => { S.st = e.target.value; render(); });
 $('#fTxt').addEventListener('input', e => { S.txt = e.target.value; render(); });
+$('#pTools').addEventListener('input', e => {
+  if (e.target.id === 'pScope') S.pvScope = e.target.value;
+  if (e.target.id === 'pNat') S.pvNat = e.target.value;
+  if (e.target.id === 'pTxt') S.pvTxt = e.target.value;
+  renderProjets();
+});
 $('#reset').addEventListener('click', () => {
   S.prios.clear(); S.flags.clear(); S.grp = S.obj = S.fac = S.st = S.txt = '';
   document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', 'false'));
@@ -1090,6 +1303,9 @@ $('#reset').addEventListener('click', () => {
 document.querySelector('main').addEventListener('click', e => {
   const ed = e.target.closest('[data-edit]'); if (ed){ selectRow(+ed.dataset.edit, true); return; }
   const se = e.target.closest('[data-select]'); if (se){ selectRow(+se.dataset.select, false); return; }
+  const pj = e.target.closest('[data-proj]'); if (pj){ S.pvSel = pj.dataset.proj; renderProjets(); $('#pBody').scrollIntoView({block: 'nearest'}); return; }
+  const go = e.target.closest('[data-goto]'); if (go){ const [t, id] = go.dataset.goto.split('|'); gotoResult(t, +id); return; }
+  if (e.target.closest('#pNoLink')){ S.pvNoLink = !S.pvNoLink; renderProjets(); return; }
   const lk = e.target.closest('[data-links]');
   if (lk){ const id = +lk.dataset.links; S.openLinks.has(id) ? S.openLinks.delete(id) : S.openLinks.add(id); render(); }
 });
