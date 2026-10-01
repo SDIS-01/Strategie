@@ -1548,13 +1548,7 @@ function renderProjets(){
       }
     }
     html += `</div></div>`;
-    // autres projets servant les mêmes résultats
-    const co = new Map();
-    res.forEach(r => r.projets.forEach(k => { if (k !== p.key) co.set(k, (co.get(k) || 0) + 1); }));
-    html += `<div class="psec"><h4>Autres projets/actions contribuant aux mêmes résultats</h4>${co.size
-      ? `<div class="tags">${[...co].sort((x, y) => y[1] - x[1] || S.pv.projets.get(x[0]).label.localeCompare(S.pv.projets.get(y[0]).label, 'fr'))
-          .map(([k, n]) => `<button class="tag" data-proj="${esc(k)}" title="Afficher ce projet">${esc(S.pv.projets.get(k).label)} (${n} résultat${n > 1 ? 's' : ''} en commun)</button>`).join('')}</div>`
-      : '<p class="status">Aucun : ce projet est le seul à servir ces résultats.</p>'}</div></div>`;
+    html += `</div>`;
   }
   body.innerHTML = warn + `<div class="pv"><div class="panel list" role="list" aria-label="Projets et actions">${list.map(item).join('')}</div>${html}</div>`;
   if (editing) pvFilter();
