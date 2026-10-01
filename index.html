@@ -199,6 +199,33 @@ label.f[hidden]{display:none}
 .psec .tags{display:flex;flex-wrap:wrap;gap:6px}
 .psec button.tag{cursor:pointer;padding:2px 8px}
 .psec button.tag:hover{border-color:var(--accent)}
+.pres{grid-template-columns:minmax(0,1fr) 90px 150px 28px;cursor:default}
+.pgo{display:grid;grid-template-columns:48px minmax(0,1fr);gap:10px;align-items:start;border:0;background:none;padding:0;text-align:left;cursor:pointer}
+.pgo b{color:var(--accent)}
+.pgo:hover span{text-decoration:underline}
+.via{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+.via.del{color:var(--ko)}
+.pdel{border:1px solid var(--line);background:#fff;border-radius:6px;width:26px;height:26px;cursor:pointer;color:var(--muted);font-size:15px;line-height:1}
+.pdel:hover{border-color:var(--ko);color:var(--ko)}
+.pbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.note{padding:8px 12px;background:var(--paper);color:var(--muted);border-top:1px solid var(--line)}
+.ok{padding:8px 12px;background:#eaf3ee;color:var(--s-real);border-top:1px solid var(--line)}
+.edp .etools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid var(--line)}
+.edp .etools input[type=search]{border:1px solid var(--line);border-radius:6px;padding:4px 6px;width:220px;max-width:100%}
+.edp .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.edp .elist{max-height:calc(100vh - 330px);min-height:160px;overflow:auto;border-top:1px solid var(--line)}
+.ck{display:grid;grid-template-columns:20px minmax(0,1fr) 80px minmax(150px,220px);gap:8px;align-items:center;padding:6px 12px;border-top:1px solid var(--line)}
+.ck label{display:grid;grid-template-columns:44px minmax(0,1fr);gap:8px;cursor:pointer}
+.ck label b{color:var(--accent)}
+.ck input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px}
+.ck select{border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:#fff;width:100%}
+.ck.add{background:#eaf3ee}.ck.rem{background:#fdf3f2}
+.ck.rem label span{text-decoration:line-through;color:var(--ko)}
+@media (max-width:760px){.ck{grid-template-columns:20px minmax(0,1fr)}.ck>.badge,.ck>.via,.ck>select{grid-column:2}}
+.efoot{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid var(--line);background:var(--paper)}
+.efoot label{display:flex;align-items:center;gap:6px}
+.efoot input{border:1px solid var(--line);border-radius:6px;padding:5px 8px;background:#fff}
+.efoot .sp{margin-left:auto;display:flex;gap:8px}
 .row.flash{animation:flash 2.5s ease-out}
 @keyframes flash{from{background:var(--accent-soft)}to{background:transparent}}
 @media (prefers-reduced-motion:reduce){.row.flash{animation:none;background:var(--accent-soft)}}
@@ -279,6 +306,12 @@ const CONFIG = {
   // Vue par projet (colonnes facultatives de la table des projets/actions)
   colNatureProjet: ['Nature', 'Nature_Action', 'Type', 'Type_Action'],
   colGroupementProjet: ['Groupement_Porteur', 'Groupement_Pilote', 'Groupement'],
+  // Rattachement aux stratégies : le lien est porté par les actions MEO (colonne Référence multiple vers chaque table de stratégie,
+  // détectée automatiquement). La colonne ID_Projet_Action des tables de stratégie est recalculée par sa formule.
+  tableMEO: 'Liste_Action_MEO',
+  colProjetMEO: ['ID_Projet_Action_AV'],
+  colLibelleMEO: ['ID_Action_MEO', 'Libelle_Action', 'Libelle', 'Intitule', 'Action', 'Nom', 'Titre'],
+  naturesRattachables: ['PEPS', 'AV'],
   // Préparation de la prochaine stratégie (colonnes facultatives)
   colsProchain: {aReformuler: ['A_reformuler'], aProposer: ['A_proposer_prochain'], reformulation: ['Reformulation_proposee']}
 };
@@ -327,7 +360,7 @@ const S = {
   view: 'pilotage', prios: new Set(), grp: '', obj: '', fac: '', st: '', txt: '',
   selectedId: null, openLinks: new Set(), dirty: false, obs: {}, obsCols: null, auteur: '', meta: null, refCache: {},
   flags: new Set(), pc: {}, refMissing: {}, qual: {},
-  pv: null, pvLoading: null, pvSel: null, pvScope: '', pvNat: '', pvTxt: '', pvNoLink: false, gotoRow: null
+  pv: null, pvLoading: null, pvSel: null, pvScope: '', pvNat: '', pvTxt: '', pvNoLink: false, gotoRow: null, pvEdit: null, pvMsg: ''
 };
 
 /* ---------- stratégies disponibles ---------- */
@@ -1103,7 +1136,35 @@ async function loadProjetsTable(){
       pct: c.av && !isEmpty(av) && !isNaN(Number(av)) ? readPct(av) : null,
       statut: val('st', i), nature: val('nat', i), groupement: val('grp', i), results: []});
   });
+  out.natCol = !!c.nat;
   return out;
+}
+async function loadMeo(){
+  let tid, raw;
+  try {
+    const tables = await grist.docApi.listTables();
+    tid = tables.find(x => norm(x) === norm(CONFIG.tableMEO)); if (!tid) return null;
+    raw = await grist.docApi.fetchTable(tid);
+  } catch(e){ return null; }
+  const m = await loadMeta(), cols = m.cols.filter(c => c.table === tid), keys = Object.keys(raw);
+  const projCol = resolveCol(keys, CONFIG.colProjetMEO) || (cols.find(c => c.type === 'Ref:' + CONFIG.tableProjets) || {}).colId;
+  if (!projCol) return null;
+  const stratCols = {}, roStrat = {};
+  S.strategies.forEach(s => {
+    const c = cols.find(x => x.type === 'RefList:' + s.id); if (!c) return;
+    if (c.isFormula) roStrat[s.id] = c.colId; else stratCols[s.id] = c.colId;
+  });
+  const lk = keys.filter(k => k !== 'id' && k !== 'manualSort' && !k.startsWith('gristHelper'));
+  const lab = resolveCol(lk, CONFIG.colLibelleMEO) || lk.find(k => k !== projCol && raw[k].some(v => typeof v === 'string' && v.trim()));
+  const labRes = lab ? await refResolver(tid, lab) : null;
+  const ids = v => Array.isArray(v) && v[0] === 'L' ? v.slice(1).filter(x => typeof x === 'number' && x > 0) : [];
+  const allCols = {...stratCols, ...roStrat};
+  const actions = raw.id.map((id, i) => {
+    const l = lab ? (labRes ? labRes(raw[lab][i]) : raw[lab][i]) : '';
+    return {id, label: String(l ?? '').trim() || 'Action #' + id, proj: raw[projCol][i],
+      links: Object.fromEntries(Object.entries(allCols).map(([sid, c]) => [sid, ids(raw[c][i])]))};
+  });
+  return {table: tid, projCol, stratCols, roStrat, actions};
 }
 async function loadStratRows(s){
   const raw = await grist.docApi.fetchTable(s.id), keys = Object.keys(raw), col = {}, rs = {};
@@ -1143,7 +1204,8 @@ async function buildPv(){
       r.projets = [...keys]; keys.forEach(k => projets.get(k).results.push(r)); results.push(r);
     }
   }
-  return {projets, results, errors};
+  const meo = await loadMeo();
+  return {projets, results, errors, meo};
 }
 function ensurePv(){
   if (S.pv) return Promise.resolve(S.pv);
@@ -1166,6 +1228,130 @@ function buildProjTools(){
     <span class="count" id="pCount"></span>`;
 }
 
+/* ---------- rattachement projet ↔ résultats attendus (écriture dans Liste_Action_MEO) ---------- */
+const projRowId = p => p && p.key.startsWith(CONFIG.tableProjets + ':') ? +p.key.slice(CONFIG.tableProjets.length + 1) : null;
+const meoOf = p => { const id = projRowId(p); return id && S.pv.meo ? S.pv.meo.actions.filter(a => a.proj === id) : []; };
+const viaMeo = (p, sid, rid) => meoOf(p).filter(a => (a.links[sid] || []).includes(rid));
+const natureOk = p => !S.pv.projets.natCol || CONFIG.naturesRattachables.some(n => norm(p.nature) === norm(n));
+function rattachInfo(p){
+  if (!projRowId(p)) return {ok: false, why: `Projet absent de ${CONFIG.tableProjets} : rattachement impossible depuis le widget.`};
+  if (!natureOk(p)) return {ok: false, why: `Nature « ${p.nature || 'non renseignée'} » : seuls les projets ${CONFIG.naturesRattachables.join(' et ')} sont rattachés aux stratégies.`};
+  if (!S.pv.meo) return {ok: false, why: `Table ${CONFIG.tableMEO} introuvable ou sans colonne de référence vers ${CONFIG.tableProjets} : rattachement impossible.`};
+  if (!Object.keys(S.pv.meo.stratCols).length) return {ok: false, why: `Aucune colonne de ${S.pv.meo.table} ne pointe vers une table de stratégie en saisie libre : rattachement impossible.`};
+  if (!meoOf(p).length) return {ok: false, why: `Ce projet n'a aucune action MEO. Créez-en une dans ${S.pv.meo.table} pour pouvoir le rattacher.`};
+  return {ok: true};
+}
+const pvChanges = () => S.pvEdit ? S.pvEdit.draft.size : 0;
+const confirmPv = () => !pvChanges() || confirm('Des rattachements ne sont pas enregistrés. Les abandonner ?');
+function pvCounts(){
+  let a = 0, r = 0; if (S.pvEdit) S.pvEdit.draft.forEach(d => d.on ? a++ : r++);
+  const t = []; if (a) t.push(`${a} rattachement${a > 1 ? 's' : ''}`); if (r) t.push(`${r} détachement${r > 1 ? 's' : ''}`);
+  return t.length ? t.join(', ') : 'Aucune modification';
+}
+function panelRow(p, sid, r){
+  const k = sid + '|' + r.id, d = S.pvEdit.draft.get(k), via = viaMeo(p, sid, r.id), on = d ? d.on : via.length > 0, acts = meoOf(p);
+  let right = '<span></span>';
+  if (d && d.on) right = acts.length > 1
+    ? `<select data-meo="${esc(k)}" aria-label="Action MEO portant le lien">${acts.map(a => `<option value="${a.id}" ${a.id === d.meo ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}</select>`
+    : `<span class="via">via ${esc(acts[0].label)}</span>`;
+  else if (d) right = `<span class="via del">retiré de ${via.length > 1 ? via.length + ' actions MEO' : esc(via[0].label)}</span>`;
+  else if (via.length) right = `<span class="via">via ${via.map(a => esc(a.label)).join(', ')}</span>`;
+  const id = 'ck-' + sid + '-' + r.id;
+  return `<div class="ck ${d ? (d.on ? 'add' : 'rem') : ''}" data-row="${esc(k)}" data-q="${esc(norm(r.resultat + ' ' + r.objectif))}">
+    <input type="checkbox" id="${esc(id)}" data-pk="${esc(k)}" ${on ? 'checked' : ''}>
+    <label for="${esc(id)}"><b>${esc(r.code || '—')}</b><span>${esc(r.resultat.replace(/^\s*[\d.]+\s*/, ''))}</span></label>${prioBadge(r.priorite)}${right}</div>`;
+}
+function panelHtml(p){
+  const E = S.pvEdit, meo = S.pv.meo;
+  const strats = S.strategies.filter(s => meo.stratCols[s.id] || meo.roStrat[s.id]);
+  if (!strats.some(s => s.id === E.strat)) E.strat = (strats.find(s => meo.stratCols[s.id]) || strats[0]).id;
+  const sid = E.strat, ro = !meo.stratCols[sid];
+  const rows = S.pv.results.filter(r => r.strat.id === sid).sort((x, y) => natCmp(x.code || '999', y.code || '999'));
+  let list = '';
+  if (ro) list = `<div class="note">La colonne ${esc(meo.roStrat[sid])} de ${esc(meo.table)} est calculée par formule : rattachement impossible pour cette stratégie.</div>`;
+  else for (const [obj, oRows] of groupBy(rows, r => r.objectif))
+    list += `<div class="ckg"><div class="sobj"><span>${esc(obj)}</span><span></span></div>${oRows.map(r => panelRow(p, sid, r)).join('')}</div>`;
+  const nAct = meoOf(p).length;
+  return `<div class="edp">
+    <div class="etools">
+      ${strats.map(s => `<button class="chip" data-pvstrat="${esc(s.id)}" aria-pressed="${s.id === sid}">${esc(s.label)}</button>`).join('')}
+      <input type="search" id="pvQ" placeholder="Rechercher un résultat…" aria-label="Rechercher un résultat" value="${esc(E.q)}">
+      <span class="count">${nAct} action${nAct > 1 ? 's' : ''} MEO dans ce projet</span>
+    </div>
+    <div class="elist">${list || '<div class="empty">Aucun résultat attendu dans cette stratégie.</div>'}</div>
+    <div class="efoot">
+      <span id="pvCount">${pvCounts()}</span>
+      ${S.obsCols ? `<label>Auteur <input id="pvAuteur" value="${esc(S.auteur)}" placeholder="Nom Prénom" autocomplete="name"></label>` : '<span class="status">Table Observations absente : modifications non tracées.</span>'}
+      <span class="sp"><button class="btn ghost" data-pvcancel>Annuler</button><button class="btn" data-pvsave>Enregistrer</button></span>
+      <span class="status" id="pvStatus" role="status"></span>
+    </div></div>`;
+}
+function pvFilter(){
+  const q = norm(S.pvEdit ? S.pvEdit.q : '');
+  document.querySelectorAll('.edp .ckg').forEach(g => {
+    let n = 0; g.querySelectorAll('.ck').forEach(c => { const h = !!q && !c.dataset.q.includes(q); c.hidden = h; if (!h) n++; });
+    g.hidden = !n;
+  });
+}
+function pvToggle(k, on){
+  const p = S.pv.projets.get(S.pvEdit.key), [sid, rid] = k.split('|'), cur = viaMeo(p, sid, +rid).length > 0;
+  if (on === cur) S.pvEdit.draft.delete(k); else S.pvEdit.draft.set(k, {on, meo: on ? meoOf(p)[0].id : null});
+  S.dirty = pvChanges() > 0;
+  const r = S.pv.results.find(x => x.strat.id === sid && x.id === +rid), row = document.querySelector(`.ck[data-row="${CSS.escape(k)}"]`);
+  if (row){ row.outerHTML = panelRow(p, sid, r); }
+  $('#pvCount').textContent = pvCounts(); $('#pvStatus').textContent = '';
+}
+async function pvSave(auteurForce){
+  const E = S.pvEdit, meo = S.pv.meo, p = S.pv.projets.get(E.key);
+  if (!E.draft.size){ $('#pvStatus') && ($('#pvStatus').textContent = 'Aucune modification à enregistrer.'); return false; }
+  const auteur = (auteurForce ?? ($('#pvAuteur') ? $('#pvAuteur').value : '')).trim();
+  if (S.obsCols && !auteur){
+    if ($('#pvAuteur')){ $('#pvAuteur').classList.add('invalid'); $('#pvAuteur').focus(); $('#pvStatus').textContent = 'Saisissez votre nom pour la traçabilité.'; }
+    return false;
+  }
+  if (auteur) S.auteur = auteur;
+  const fin = new Map(), obs = [];
+  const setOf = (a, sid) => { const col = meo.stratCols[sid], k = a.id + '|' + col;
+    if (!fin.has(k)) fin.set(k, {a, col, ids: new Set(a.links[sid] || [])}); return fin.get(k).ids; };
+  for (const [k, d] of E.draft){
+    const [sid, rs] = k.split('|'), rid = +rs, r = S.pv.results.find(x => x.strat.id === sid && x.id === rid);
+    if (!meo.stratCols[sid]) continue;
+    if (d.on){
+      const a = meoOf(p).find(x => x.id === d.meo) || meoOf(p)[0]; setOf(a, sid).add(rid);
+      obs.push([sid, r, `Projet « ${p.label} » rattaché à ce résultat via l'action MEO « ${a.label} » (widget de pilotage).`]);
+    } else {
+      const via = viaMeo(p, sid, rid); via.forEach(a => setOf(a, sid).delete(rid));
+      obs.push([sid, r, `Projet « ${p.label} » détaché de ce résultat (action${via.length > 1 ? 's' : ''} MEO : ${via.map(a => a.label).join(', ')}) (widget de pilotage).`]);
+    }
+  }
+  const actions = [...fin.values()].map(f => ['UpdateRecord', meo.table, f.a.id, {[f.col]: ['L', ...[...f.ids].sort((x, y) => x - y)]}]);
+  if (S.obsCols) obs.forEach(([sid, r, txt]) => {
+    const c = S.obsCols, rec = {}; rec[c.strategie] = sid; rec[c.idResultat] = r.id; rec[c.texte] = txt; rec[c.nom] = auteur;
+    if (c.date) rec[c.date] = Date.now() / 1000; if (c.resultat) rec[c.resultat] = r.resultat;
+    actions.push(['AddRecord', CONFIG.tableObs, null, rec]);
+  });
+  const msg = pvCounts();
+  if ($('#pvStatus')) $('#pvStatus').textContent = 'Enregistrement…';
+  try {
+    await grist.docApi.applyUserActions(actions);
+  } catch(e){
+    const t = "Échec de l'enregistrement : " + (e.message || e);
+    if ($('#pvStatus')) $('#pvStatus').textContent = t; else alert(t);
+    return false;
+  }
+  S.pvEdit = null; S.dirty = false; S.pvMsg = msg + ' enregistré' + (obs.length > 1 ? 's' : '') + (S.obsCols ? ', tracé dans Observations.' : '.');
+  await load();
+  return true;
+}
+async function pvDetach(sid, rid){
+  const p = S.pv.projets.get(S.pvSel), r = S.pv.results.find(x => x.strat.id === sid && x.id === rid), via = viaMeo(p, sid, rid);
+  if (!confirm(`Détacher le résultat ${r.code || ''} du projet « ${p.label} » ?\n\nIl sera retiré de l'action${via.length > 1 ? 's' : ''} MEO : ${via.map(a => a.label).join(', ')}.`)) return;
+  let auteur = S.auteur;
+  if (S.obsCols && !auteur){ auteur = (prompt('Votre nom, pour la traçabilité dans Observations :') || '').trim(); if (!auteur) return; }
+  S.pvEdit = {key: p.key, strat: sid, q: '', draft: new Map([[sid + '|' + rid, {on: false}]])};
+  if (!await pvSave(auteur)){ S.pvEdit = null; renderProjets(); }
+}
+
 function renderProjets(){
   const body = $('#pBody');
   if (!S.pv){
@@ -1178,7 +1364,7 @@ function renderProjets(){
   const q = norm(S.pvTxt);
   const all = [...S.pv.projets.values()].filter(p => !p.libre || p.results.length).map(p => ({p, res: p.results.filter(inScope)}));
   const base = all.filter(x => (!S.pvNat || x.p.nature === S.pvNat) && (!q || norm(x.p.label + ' ' + x.p.groupement).includes(q)));
-  const sansLien = base.filter(x => !x.res.length && !x.p.libre);
+  const sansLien = base.filter(x => !x.res.length && !x.p.libre && natureOk(x.p));
   const list = (S.pvNoLink ? sansLien : base)
     .sort((a, b) => (!a.res.length) - (!b.res.length) || a.p.label.localeCompare(b.p.label, 'fr', {numeric: true}));
   $('#pNoLink').textContent = `Sans lien stratégique (${sansLien.length})`;
@@ -1189,7 +1375,7 @@ function renderProjets(){
   if (!list.some(x => x.p.key === S.pvSel)) S.pvSel = list[0].p.key;
 
   const nStrat = res => new Set(res.map(r => r.strat.id)).size;
-  const item = ({p, res}) => `<button class="pitem ${res.length || p.libre ? '' : 'nolink'}" data-proj="${esc(p.key)}" aria-current="${p.key === S.pvSel}">
+  const item = ({p, res}) => `<button class="pitem ${res.length || p.libre || !natureOk(p) ? '' : 'nolink'}" data-proj="${esc(p.key)}" aria-current="${p.key === S.pvSel}">
       ${esc(p.label)}<small>${res.length ? `${res.length} résultat${res.length > 1 ? 's' : ''} attendu${res.length > 1 ? 's' : ''}, ${nStrat(res)} stratégie${nStrat(res) > 1 ? 's' : ''}` : 'Aucun lien stratégique'}${p.libre ? ', saisi en texte libre' : ''}</small></button>`;
 
   const cur = list.find(x => x.p.key === S.pvSel), p = cur.p, res = cur.res;
@@ -1197,14 +1383,20 @@ function renderProjets(){
   const col = p.pct === undefined ? null : lienColor(lien);
   const stProj = p.statut || (typeof p.pct === 'number' ? statutAuto(p.pct) : '');
   const meta = [p.nature, p.groupement].filter(Boolean).map(esc).join(', ');
+  const info = rattachInfo(p), editing = S.pvEdit && S.pvEdit.key === p.key;
   let html = `<div class="panel"><div class="phead"><div><h3>${esc(p.label)}</h3>
-      <div class="meta">${meta ? `<span>${meta}</span>` : ''}${p.libre ? '<span class="tag">Lien saisi en texte libre, projet non retrouvé dans ' + esc(CONFIG.tableProjets) + '</span>' : ''}</div></div>
+      <div class="meta">${meta ? `<span>${meta}</span>` : ''}${p.libre ? '<span class="tag">Lien saisi en texte libre, projet non retrouvé dans ' + esc(CONFIG.tableProjets) + '</span>' : ''}</div>
+      ${info.ok && !editing ? `<div class="pbar"><button class="btn ghost" data-pvopen>Rattacher à des résultats</button></div>` : ''}</div>
     ${p.pct === undefined ? '' : `<div class="prog" style="--c:${col || 'var(--muted)'}">
       ${stProj ? (col ? `<span class="st" style="--c:${col};color:${lienText(lien)}">${esc(stProj)}</span>` : `<span class="st neutre">${esc(stProj)}</span>`) : ''}
       ${typeof p.pct === 'number' ? `<span class="pb"><i style="width:${p.pct}%"></i></span><b>${pctTxt(p.pct)} d'avancement projet</b>` : '<span class="status">Avancement non renseigné</span>'}</div>`}</div>`;
 
-  if (!res.length){
-    html += `<div class="empty">Ce projet n'est rattaché à aucun résultat attendu${S.pvScope ? ' dans cette stratégie' : ''}. Le rattachement se fait dans la colonne ${esc(CONFIG.cols.liens[0])} des tables de stratégie.</div></div>`;
+  if (S.pvMsg) html += `<div class="ok" role="status">${esc(S.pvMsg)}</div>`;
+  if (!info.ok) html += `<div class="note">${esc(info.why)}</div>`;
+  if (editing){
+    html += panelHtml(p) + `</div>`;
+  } else if (!res.length){
+    html += `<div class="empty">Ce projet n'est rattaché à aucun résultat attendu${S.pvScope ? ' dans cette stratégie' : ''}.${info.ok ? ' Utilisez « Rattacher à des résultats ».' : ''}</div></div>`;
   } else {
     const a = aggregate(res), nP1 = res.filter(r => r.priorite === 'P1').length;
     html += `<div class="kpis">
@@ -1217,9 +1409,14 @@ function renderProjets(){
       html += `<div class="obj"><span>${esc(s.label)}</span>${miniBar(sRes)}</div>`;
       for (const [obj, oRes] of groupBy(sRes.sort((x, y) => natCmp(x.code || '999', y.code || '999')), r => r.objectif)){
         html += `<div class="sobj"><span>${esc(obj)}</span>${miniBar(oRes)}</div>`;
-        oRes.forEach(r => { html += `<button class="pres" data-goto="${esc(s.id)}|${r.id}" title="Voir dans l'onglet Pilotage">
-          <b>${esc(r.code || '—')}</b><span>${esc(r.resultat.replace(/^\s*[\d.]+\s*/, ''))}</span>${prioBadge(r.priorite)}
-          <span class="prog" style="--c:${ST_COLOR[r.statut]}">${stBadge(r.statut)}<span class="pb"><i style="width:${r.pct}%"></i></span><b>${pctTxt(r.pct)}</b></span></button>`; });
+        oRes.forEach(r => {
+          const via = viaMeo(p, s.id, r.id), canDel = info.ok && via.length && S.pv.meo.stratCols[s.id];
+          html += `<div class="pres">
+          <button class="pgo" data-goto="${esc(s.id)}|${r.id}" title="Voir dans l'onglet Pilotage"><b>${esc(r.code || '—')}</b>
+            <span>${esc(r.resultat.replace(/^\s*[\d.]+\s*/, ''))}${via.length ? `<small class="via">via ${via.map(a => esc(a.label)).join(', ')}</small>` : ''}</span></button>
+          ${prioBadge(r.priorite)}
+          <span class="prog" style="--c:${ST_COLOR[r.statut]}">${stBadge(r.statut)}<span class="pb"><i style="width:${r.pct}%"></i></span><b>${pctTxt(r.pct)}</b></span>
+          ${canDel ? `<button class="pdel" data-detach="${esc(s.id)}|${r.id}" aria-label="Détacher le résultat ${esc(r.code)} de ce projet" title="Détacher de ce projet">×</button>` : '<span></span>'}</div>`; });
       }
     }
     html += `</div></div>`;
@@ -1232,6 +1429,7 @@ function renderProjets(){
       : '<p class="status">Aucun : ce projet est le seul à servir ces résultats.</p>'}</div></div>`;
   }
   body.innerHTML = warn + `<div class="pv"><div class="panel list" role="list" aria-label="Projets et actions">${list.map(item).join('')}</div>${html}</div>`;
+  if (editing) pvFilter();
 }
 
 /* clic sur un résultat : ouverture de l'onglet Pilotage sur la bonne stratégie, filtres levés, ligne mise en évidence */
@@ -1254,6 +1452,7 @@ async function gotoResult(stratId, rowId){
 const confirmLeave = () => !S.dirty || confirm('Des modifications ne sont pas enregistrées. Les abandonner ?');
 function setView(v){
   if (S.view === 'saisie' && v !== 'saisie' && !confirmLeave()) return;
+  if (S.view === 'projets' && v !== 'projets'){ if (!confirmPv()) return; S.pvEdit = null; S.pvMsg = ''; }
   S.view = v; S.dirty = false;
   document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.view === v));
   document.querySelectorAll('.view').forEach(s => s.classList.toggle('active', s.id === 'v-' + v));
@@ -1288,7 +1487,18 @@ $('#fObj').addEventListener('change', e => { S.obj = e.target.value; render(); }
 $('#fFac').addEventListener('change', e => { S.fac = e.target.value; render(); });
 $('#fSt').addEventListener('change', e => { S.st = e.target.value; render(); });
 $('#fTxt').addEventListener('input', e => { S.txt = e.target.value; render(); });
+$('#pBody').addEventListener('change', e => {
+  const ck = e.target.closest('[data-pk]'); if (ck){ pvToggle(ck.dataset.pk, ck.checked); return; }
+  const sel = e.target.closest('[data-meo]');
+  if (sel){ const d = S.pvEdit.draft.get(sel.dataset.meo); if (d) d.meo = +sel.value; }
+});
+$('#pBody').addEventListener('input', e => {
+  if (e.target.id === 'pvQ'){ S.pvEdit.q = e.target.value; pvFilter(); }
+  if (e.target.id === 'pvAuteur'){ e.target.classList.remove('invalid'); $('#pvStatus').textContent = ''; }
+});
 $('#pTools').addEventListener('input', e => {
+  if (S.pvEdit && !confirmPv()){ e.target.value = e.target.id === 'pScope' ? S.pvScope : e.target.id === 'pNat' ? S.pvNat : S.pvTxt; return; }
+  if (S.pvEdit){ S.pvEdit = null; S.dirty = false; }
   if (e.target.id === 'pScope') S.pvScope = e.target.value;
   if (e.target.id === 'pNat') S.pvNat = e.target.value;
   if (e.target.id === 'pTxt') S.pvTxt = e.target.value;
@@ -1303,8 +1513,16 @@ $('#reset').addEventListener('click', () => {
 document.querySelector('main').addEventListener('click', e => {
   const ed = e.target.closest('[data-edit]'); if (ed){ selectRow(+ed.dataset.edit, true); return; }
   const se = e.target.closest('[data-select]'); if (se){ selectRow(+se.dataset.select, false); return; }
-  const pj = e.target.closest('[data-proj]'); if (pj){ S.pvSel = pj.dataset.proj; renderProjets(); $('#pBody').scrollIntoView({block: 'nearest'}); return; }
-  const go = e.target.closest('[data-goto]'); if (go){ const [t, id] = go.dataset.goto.split('|'); gotoResult(t, +id); return; }
+  const pj = e.target.closest('[data-proj]');
+  if (pj){ if (pj.dataset.proj === S.pvSel || !confirmPv()) return;
+    S.pvEdit = null; S.dirty = false; S.pvMsg = ''; S.pvSel = pj.dataset.proj; renderProjets(); $('#pBody').scrollIntoView({block: 'nearest'}); return; }
+  const go = e.target.closest('[data-goto]'); if (go){ if (!confirmPv()) return; S.pvEdit = null; S.dirty = false; const [t, id] = go.dataset.goto.split('|'); gotoResult(t, +id); return; }
+  if (e.target.closest('[data-pvopen]')){ S.pvMsg = ''; const pp = S.pv.projets.get(S.pvSel);
+    S.pvEdit = {key: S.pvSel, strat: S.pvScope || (pp.results.find(r => S.pv.meo.stratCols[r.strat.id]) || {strat: {}}).strat.id || '', q: '', draft: new Map()}; renderProjets(); $('#pvQ') && $('#pvQ').focus(); return; }
+  if (e.target.closest('[data-pvcancel]')){ if (!confirmPv()) return; S.pvEdit = null; S.dirty = false; renderProjets(); return; }
+  if (e.target.closest('[data-pvsave]')){ pvSave(); return; }
+  const ps = e.target.closest('[data-pvstrat]'); if (ps){ S.pvEdit.strat = ps.dataset.pvstrat; renderProjets(); return; }
+  const dt = e.target.closest('[data-detach]'); if (dt){ const [t, id] = dt.dataset.detach.split('|'); S.pvMsg = ''; pvDetach(t, +id); return; }
   if (e.target.closest('#pNoLink')){ S.pvNoLink = !S.pvNoLink; renderProjets(); return; }
   const lk = e.target.closest('[data-links]');
   if (lk){ const id = +lk.dataset.links; S.openLinks.has(id) ? S.openLinks.delete(id) : S.openLinks.add(id); render(); }
