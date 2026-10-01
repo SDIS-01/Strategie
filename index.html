@@ -809,6 +809,16 @@ function renderMatrice(rows){
   el.innerHTML = html;
 }
 
+/* conserve la position de défilement de la liste lors d'un nouveau rendu */
+const listTop = c => { const l = c.querySelector('.list'); return l ? l.scrollTop : 0; };
+function restoreList(c, top){
+  const l = c.querySelector('.list'); if (!l) return;
+  l.scrollTop = top;
+  const cur = l.querySelector('[aria-current="true"]');
+  if (cur){ const a = cur.getBoundingClientRect(), b = l.getBoundingClientRect();
+    if (a.top < b.top || a.bottom > b.bottom) cur.scrollIntoView({block: 'nearest'}); }
+}
+
 function renderSaisie(rows){
   const el = $('#v-saisie');
   if (!rows.length){ el.innerHTML = `<div class="empty">Aucun résultat attendu ne correspond aux filtres.</div>`; return; }
@@ -816,6 +826,7 @@ function renderSaisie(rows){
   const r = S.rows.find(x => x.id === S.selectedId);
   const v = x => isEmpty(x) ? '' : esc(x);
   const canAv = S.colIds.avancement && S.colIds.statut;
+  const top0 = listTop(el);
   el.innerHTML = `<div class="edit">
     <div class="panel list">${rows.map(x => `<button class="item" data-select="${x.id}" aria-current="${x.id === r.id}" style="--c:${ST_COLOR[x.statut]}">
       <b>${pctTxt(x.pct)}</b><span>${esc(x.resultat.slice(0, 110))}${x.resultat.length > 110 ? '…' : ''}</span></button>`).join('')}</div>
@@ -889,6 +900,7 @@ function renderSaisie(rows){
   }
   $('#save').addEventListener('click', save);
   $('#cancel').addEventListener('click', () => renderSaisie(filtered()));
+  restoreList(el, top0);
   validate();
 }
 
@@ -1550,7 +1562,9 @@ function renderProjets(){
     html += `</div></div>`;
     html += `</div>`;
   }
+  const top0 = listTop(body);
   body.innerHTML = warn + `<div class="pv"><div class="panel list" role="list" aria-label="Projets et actions">${list.map(item).join('')}</div>${html}</div>`;
+  restoreList(body, top0);
   if (editing) pvFilter();
 }
 
@@ -1637,7 +1651,7 @@ document.querySelector('main').addEventListener('click', e => {
   const se = e.target.closest('[data-select]'); if (se){ selectRow(+se.dataset.select, false); return; }
   const pj = e.target.closest('[data-proj]');
   if (pj){ if (pj.dataset.proj === S.pvSel || !confirmPv()) return;
-    S.pvEdit = null; S.dirty = false; S.pvMsg = ''; S.pvSel = pj.dataset.proj; renderProjets(); $('#pBody').scrollIntoView({block: 'nearest'}); return; }
+    S.pvEdit = null; S.dirty = false; S.pvMsg = ''; S.pvSel = pj.dataset.proj; renderProjets(); return; }
   const go = e.target.closest('[data-goto]'); if (go){ if (!confirmPv()) return; S.pvEdit = null; S.dirty = false; const [t, id] = go.dataset.goto.split('|'); gotoResult(t, +id); return; }
   if (e.target.closest('[data-pvopen]')){ S.pvMsg = ''; const pp = S.pv.projets.get(S.pvSel);
     S.pvEdit = {key: S.pvSel, strat: S.pvScope || (pp.results.find(r => S.pv.meo.stratCols[r.strat.id]) || {strat: {}}).strat.id || '', q: '', draft: new Map()}; renderProjets(); $('#pvQ') && $('#pvQ').focus(); return; }
