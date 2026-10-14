@@ -1069,7 +1069,8 @@ const EXP = {
   accent: '#2f4a6d', accentSoft: '#e7ecf3', ink: '#2b2f36', muted: '#6e6a62', line: '#e6e1d6', track: '#efebe3', paper: '#f7f5f0',
   prio: {P1: '#b5473a', P2: '#a87522', P3: '#5e7a8c'}, prioSoft: {P1: '#f6e3df', P2: '#f7edd9', P3: '#e6edf1'},
   st: {'À engager': '#f1bcb4', 'En cours': '#d9a441', 'Réalisé': '#4e8b6a', 'Abandonné': '#6b6f76'},
-  stText: {'À engager': '#7a2e24', 'En cours': '#4a3508', 'Réalisé': '#ffffff', 'Abandonné': '#ffffff'}
+  stText: {'À engager': '#7a2e24', 'En cours': '#4a3508', 'Réalisé': '#ffffff', 'Abandonné': '#ffffff'},
+  stWord: {'À engager': '#b5473a', 'En cours': '#a87522', 'Réalisé': '#4e8b6a', 'Abandonné': '#6b6f76'}  // statut écrit en couleur, sans fond
 };
 const EXP_STATUTS = ['À engager', 'En cours', 'Réalisé', 'Abandonné'];
 const expNil = v => v === null || v === undefined || v === '' || (typeof v === 'number' && isNaN(v));
@@ -1081,7 +1082,7 @@ const expT0 = r => expNil(r.t0) && expNil(r.cible) ? '' : `${expNum(r.t0)} → $
 const expCom = r => r.comments && r.comments[0] ? r.comments[0] : null;
 const expComTxt = r => { const c = expCom(r); return c ? `${c.texte} (${c.nom || 'auteur inconnu'}, ${expDate(c.date)})` : ''; };
 const expRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
-const expLienHex = l => { const c = lienColor(l), k = Object.keys(ST_COLOR).find(s => ST_COLOR[s] === c); return k ? EXP.st[k] : EXP.muted; };
+const expLienHex = l => { const c = lienColor(l), k = Object.keys(ST_COLOR).find(s => ST_COLOR[s] === c); return k ? EXP.stWord[k] : EXP.muted; };
 const expFile = (ctx, ext) => `Pilotage_${ctx.strat.id}_${ctx.date.toISOString().slice(0, 10)}.${ext}`;
 
 /* ----- PDF (jsPDF + autotable) ----- */
@@ -1138,10 +1139,8 @@ function buildPdf(ctx, jsPDF){
   doc.setFont('helvetica', 'bold'); doc.setFontSize(14); color('setTextColor', EXP.accent);
   doc.text('Détail des résultats attendus', M, 16);
   // Colonne « Projets / actions liés » : une ligne par projet (pastille de statut, libellé tronqué, barre, %)
-  const LW = 74, LPAD = 1.6, LDOT = 2.6, LRIGHT = 19, LFS = 7.5;
+  const LW = 86, LPAD = 1.6, LDOT = 2.6, LRIGHT = 21, LFS = 7.5;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(LFS);
-  const fit = (s, w) => { s = T(s); if (doc.getTextWidth(s) <= w) return s;
-    while (s.length > 1 && doc.getTextWidth(s + '...') > w) s = s.slice(0, -1); return s.trimEnd() + '...'; };
   const linksOf = {};
   const body = [];
   ctx.byObj.forEach((o, oi) => {
@@ -1149,32 +1148,35 @@ function buildPdf(ctx, jsPDF){
     body.push([{content: T(`${o.name}  (${o.agg.n} résultats, ${expPct(o.agg.taux)})`), colSpan: 8,
       styles: {fillColor: expRgb(EXP.accentSoft), textColor: expRgb(EXP.accent), fontStyle: 'bold'}}]);
     o.rows.forEach(r => {
-      const ls = r.links.map(l => ({...l, txt: fit(l.label, LW - 2 * LPAD - LDOT - (l.pct === undefined ? 0 : LRIGHT))}));
+      const ls = r.links.map(l => ({...l, lines: doc.splitTextToSize(T(l.label), LW - 2 * LPAD - LDOT - (l.pct === undefined ? 0 : LRIGHT))}));
       linksOf[body.length] = ls;
       body.push([T(r.resultat), r.priorite || '-', T(r.groupement || '-'), r.statut, T(expPct(r.pct)), T(expT0(r)),
-        ls.map(l => l.txt).join('\n'), T(expComTxt(r))]);
+        ls.flatMap(l => l.lines).join('\n'), T(expComTxt(r))]);
     });
   });
   doc.autoTable({
     startY: 21, margin: {left: M, right: M, bottom: 14},
-    head: [['Résultat attendu', 'Prio.', 'Groupement', 'Statut', 'Avct', 'T0 -> cible', 'Projets / actions liés', 'Dernier commentaire']],
+    head: [['Résultat attendu', 'Prio.', 'Grpt', 'Statut', 'Avct', 'T0 -> cible', 'Projets / actions liés', 'Dernier commentaire']],
     body,
     styles: {font: 'helvetica', fontSize: 7.5, cellPadding: 1.6, textColor: expRgb(EXP.ink), lineColor: expRgb(EXP.line), lineWidth: 0.1, valign: 'middle'},
     headStyles: {fillColor: expRgb(EXP.accent), textColor: [255, 255, 255], fontStyle: 'bold'},
-    columnStyles: {0: {cellWidth: 66}, 1: {cellWidth: 11, halign: 'center', fontStyle: 'bold'}, 2: {cellWidth: 22}, 3: {cellWidth: 19, halign: 'center'},
+    columnStyles: {0: {cellWidth: 66}, 1: {cellWidth: 11, halign: 'center', fontStyle: 'bold'}, 2: {cellWidth: 14}, 3: {cellWidth: 17, halign: 'center', fontStyle: 'bold'},
                    4: {cellWidth: 12, halign: 'right', fontStyle: 'bold'}, 5: {cellWidth: 22}, 6: {cellWidth: LW}, 7: {cellWidth: 'auto'}},
     willDrawCell: d => { if (d.section === 'body' && d.column.index === 6 && linksOf[d.row.index]) d.cell.text = []; },
     didDrawCell: d => {
       const ls = d.section === 'body' && d.column.index === 6 ? linksOf[d.row.index] : null;
       if (ls && ls.length){
         const fs = LFS / doc.internal.scaleFactor, lh = fs * doc.getLineHeightFactor();
-        const top = d.cell.y + (d.cell.height - ls.length * lh) / 2, x0 = d.cell.x + LPAD, xr = d.cell.x + d.cell.width - LPAD;
+        const x0 = d.cell.x + LPAD, xr = d.cell.x + d.cell.width - LPAD;
         doc.setFontSize(LFS);
-        ls.forEach((l, i) => {
-          const cy = top + (i + 0.5) * lh, base = cy + fs * 0.35, hex = expLienHex(l);
+        const nl = ls.reduce((n, l) => n + l.lines.length, 0), top2 = d.cell.y + (d.cell.height - nl * lh) / 2;
+        let li = 0;
+        ls.forEach(l => {
+          const cy = top2 + (li + 0.5) * lh, base = cy + fs * 0.35, hex = expLienHex(l);
           color('setFillColor', hex); doc.circle(x0 + 0.9, cy, 0.9, 'F');
           doc.setFont('helvetica', 'normal'); color('setTextColor', l.pct === undefined ? EXP.muted : EXP.ink);
-          doc.text(l.txt, x0 + LDOT, base);
+          l.lines.forEach((t, j) => doc.text(t, x0 + LDOT, base + j * lh));
+          li += l.lines.length;
           if (l.pct === undefined) return;  // lien en texte libre : non suivi
           if (typeof l.pct !== 'number'){ color('setTextColor', EXP.muted); doc.text('n.r.', xr, base, {align: 'right'}); return; }
           doc.setFont('helvetica', 'bold'); color('setTextColor', EXP.ink); doc.text(T(expPct(l.pct)), xr, base, {align: 'right'});
@@ -1194,7 +1196,7 @@ function buildPdf(ctx, jsPDF){
     },
     didParseCell: d => {
       if (d.section !== 'body' || d.row.raw.length === 1) return;
-      if (d.column.index === 3 && EXP.st[d.cell.raw]){ d.cell.styles.fillColor = expRgb(EXP.st[d.cell.raw]); d.cell.styles.textColor = expRgb(EXP.stText[d.cell.raw]); }
+      if (d.column.index === 3 && EXP.stWord[d.cell.raw]) d.cell.styles.textColor = expRgb(EXP.stWord[d.cell.raw]);
       if (d.column.index === 1 && EXP.prio[d.cell.raw]) d.cell.styles.textColor = expRgb(EXP.prio[d.cell.raw]);
     }
   });
@@ -1216,7 +1218,7 @@ function buildPdf(ctx, jsPDF){
       columnStyles: {0: {cellWidth: 75}, 1: {cellWidth: 45}, 2: {cellWidth: 19, halign: 'center'}, 3: {cellWidth: 12, halign: 'right', fontStyle: 'bold'},
                      4: {cellWidth: 18, halign: 'center', fontStyle: 'bold'}, 5: {cellWidth: 18, halign: 'center', fontStyle: 'bold'}, 6: {cellWidth: 'auto'}},
       didParseCell: d => {
-        if (d.section === 'body' && d.column.index === 2 && EXP.st[d.cell.raw]){ d.cell.styles.fillColor = expRgb(EXP.st[d.cell.raw]); d.cell.styles.textColor = expRgb(EXP.stText[d.cell.raw]); }
+        if (d.section === 'body' && d.column.index === 2 && EXP.stWord[d.cell.raw]) d.cell.styles.textColor = expRgb(EXP.stWord[d.cell.raw]);
       }
     });
   }
